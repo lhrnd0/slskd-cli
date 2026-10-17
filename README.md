@@ -5,18 +5,20 @@
 ## Install and build
 
 ```sh
-npm ci
-npm run lint
-npm run format:check
-npm run typecheck
-npm run build
-npm test
-npm pack --dry-run
+pnpm install --frozen-lockfile
+pnpm lint
+pnpm format:check
+pnpm typecheck
+pnpm build
+pnpm test
+pnpm pack --dry-run
 ```
 
-Run `npm run format` to apply the repository's oxfmt rules. `npm run lint:fix` applies safe oxlint fixes.
+The project declares its pnpm version in `package.json`. Run `corepack enable` once if your Node.js installation includes Corepack but pnpm is not available.
 
-The npm package exposes `slskd-cli` from `dist/cli.js`. After publication, install it with `npm install -g slskd-cli`. During development, use `node dist/cli.js` in place of `slskd-cli` below.
+Run `pnpm format` to apply the repository's oxfmt rules. `pnpm lint:fix` applies safe oxlint fixes.
+
+The npm package exposes `slskd-cli` from `dist/cli.js`. After publication, install it with `pnpm add --global slskd-cli`. During development, use `node dist/cli.js` in place of `slskd-cli` below.
 
 ## Connection profile
 
