@@ -6,10 +6,15 @@
 
 ```sh
 npm ci
+npm run lint
+npm run format:check
+npm run typecheck
 npm run build
 npm test
 npm pack --dry-run
 ```
+
+Run `npm run format` to apply the repository's oxfmt rules. `npm run lint:fix` applies safe oxlint fixes.
 
 The npm package exposes `slskd-cli` from `dist/cli.js`. After publication, install it with `npm install -g slskd-cli`. During development, use `node dist/cli.js` in place of `slskd-cli` below.
 
@@ -63,16 +68,16 @@ Every mutation needs its own literal `--yes`. `cancel` leaves completed or alrea
 
 ## Exit codes
 
-| Exit | Meaning | Error codes |
-| ---: | --- | --- |
-| 0 | Success | — |
-| 2 | Invalid input or acknowledgement | `INVALID_INPUT`, `INVALID_CONFIG`, `INVALID_CANDIDATE`, `ACKNOWLEDGEMENT_REQUIRED` |
-| 3 | Missing Connection values | `MISSING_CONFIGURATION` |
-| 4 | Authentication or key permissions | `AUTHENTICATION` |
-| 5 | Unsupported or unreadable slskd version | `INCOMPATIBLE` |
-| 6 | Connection failure | `CONNECTION` |
-| 7 | Remote error, missing/expired Search or Candidate, missing Transfer | `REMOTE`, `MISSING_SEARCH`, `EXPIRED_SEARCH`, `MISSING_CANDIDATE`, `TRANSFER_NOT_FOUND` |
-| 8 | Read request timeout | `TIMEOUT` |
-| 9 | Unknown mutation outcome | `AMBIGUOUS_MUTATION` |
+| Exit | Meaning                                                             | Error codes                                                                             |
+| ---: | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+|    0 | Success                                                             | —                                                                                       |
+|    2 | Invalid input or acknowledgement                                    | `INVALID_INPUT`, `INVALID_CONFIG`, `INVALID_CANDIDATE`, `ACKNOWLEDGEMENT_REQUIRED`      |
+|    3 | Missing Connection values                                           | `MISSING_CONFIGURATION`                                                                 |
+|    4 | Authentication or key permissions                                   | `AUTHENTICATION`                                                                        |
+|    5 | Unsupported or unreadable slskd version                             | `INCOMPATIBLE`                                                                          |
+|    6 | Connection failure                                                  | `CONNECTION`                                                                            |
+|    7 | Remote error, missing/expired Search or Candidate, missing Transfer | `REMOTE`, `MISSING_SEARCH`, `EXPIRED_SEARCH`, `MISSING_CANDIDATE`, `TRANSFER_NOT_FOUND` |
+|    8 | Read request timeout                                                | `TIMEOUT`                                                                               |
+|    9 | Unknown mutation outcome                                            | `AMBIGUOUS_MUTATION`                                                                    |
 
 An unknown mutation outcome uses exit 9 and `AMBIGUOUS_MUTATION`, including a timeout after sending a mutation. The CLI does not retry state-changing requests automatically.
