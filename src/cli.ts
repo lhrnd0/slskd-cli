@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { CliError, compatible, resolveContext, requireYes } from "./core.js";
-import { searchCreate, searchCandidates, searchList } from "./search.js";
+import { searchCreate, searchCandidates, searchDelete, searchList } from "./search.js";
 import { transferEnqueue } from "./enqueue.js";
 import { transferCancel, transferClear, transferDelete, transferInspect } from "./transfer.js";
 
@@ -22,6 +22,7 @@ Commands:
   search list                   List existing searches
   search create                 Create a search
   search candidates             List candidates for a search
+  search delete                 Delete a search
   transfer enqueue              Enqueue a candidate for download
   transfer show                 Show a download transfer
   transfer cancel               Cancel a download transfer
@@ -41,7 +42,8 @@ Run "slskd <command> --help" for command-specific help.`,
 Commands:
   list                           List existing searches
   create                         Create a search
-  candidates <searchId>          List candidates for a search`,
+  candidates <searchId>          List candidates for a search
+  delete <searchId> --yes        Delete a search`,
   ],
   [
     "search list",
@@ -58,6 +60,12 @@ Create a literal slskd search. Lifetime must be between 5 and 300 seconds and de
     `Usage: slskd search candidates <searchId> [connection options]
 
 List normalized candidates using the slskd UUID from search create or search list.`,
+  ],
+  [
+    "search delete",
+    `Usage: slskd search delete <searchId> --yes [connection options]
+
+Delete a search and its stored responses from slskd.`,
   ],
   [
     "transfer",
@@ -155,6 +163,7 @@ async function run(argv: string[]): Promise<unknown> {
   }
   const command = words.slice(0, 2).join(" ");
   const isMutation =
+    command === "search delete" ||
     command === "transfer enqueue" ||
     command === "transfer cancel" ||
     command === "transfer clear" ||
@@ -172,6 +181,7 @@ async function run(argv: string[]): Promise<unknown> {
       "search list",
       "search create",
       "search candidates",
+      "search delete",
       "transfer enqueue",
       "transfer show",
       "transfer cancel",
@@ -201,6 +211,10 @@ async function run(argv: string[]): Promise<unknown> {
   if (command === "search candidates") {
     requireWords(words, 3);
     return { searchId: words[2], candidates: await searchCandidates(ctx, words[2]!) };
+  }
+  if (command === "search delete") {
+    requireWords(words, 3);
+    return searchDelete(ctx, words[2]!);
   }
   if (command === "transfer enqueue") {
     requireWords(words, 4);

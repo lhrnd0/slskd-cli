@@ -18,6 +18,7 @@ test("package exposes the slskd executable", () => {
 async function fixture(options = {}) {
   const calls = [];
   let transfer = null;
+  let searchDeleted = false;
   const startedAt = options.startedAt ?? new Date().toISOString();
   const searchId = options.searchId ?? SEARCH_ID;
   const server = createServer(async (req, res) => {
@@ -40,11 +41,20 @@ async function fixture(options = {}) {
       return send(200, options.searches ?? []);
     if (path === "/api/v0/searches" && req.method === "POST")
       return send(200, { id: searchId, startedAt });
-    if (path.toLowerCase() === `/api/v0/searches/${searchId}`)
-      return send(
-        options.searchStatus ?? 200,
-        options.search ?? { id: searchId, startedAt, state: "InProgress" },
-      );
+    if (path.toLowerCase() === `/api/v0/searches/${searchId}` && req.method === "GET")
+      return searchDeleted
+        ? send(404, {})
+        : send(
+            options.searchStatus ?? 200,
+            options.search ?? { id: searchId, startedAt, state: "InProgress" },
+          );
+    if (path.toLowerCase() === `/api/v0/searches/${searchId}` && req.method === "DELETE") {
+      if (searchDeleted || options.searchStatus === 404) return send(404, {});
+      if (options.delaySearchDelete)
+        await new Promise((resolve) => setTimeout(resolve, options.delaySearchDelete));
+      searchDeleted = true;
+      return send(204);
+    }
     if (path === `/api/v0/searches/${searchId}/responses`)
       return send(200, [
         {
@@ -138,6 +148,7 @@ test("help covers the root, command groups, and every command without configurat
     ["search", "list"],
     ["search", "create"],
     ["search", "candidates"],
+    ["search", "delete"],
     ["transfer"],
     ["transfer", "enqueue"],
     ["transfer", "show"],
@@ -646,6 +657,51 @@ test("canonical Search GUIDs work across API keys and UUID casing", async () => 
       host.calls.find((call) => call.path === "/api/v0/transfers/downloads/batches").body,
     );
     assert.equal(payload.searchId, searchId);
+  } finally {
+    await host.close();
+  }
+});
+
+test("search delete requires acknowledgement and removes the Search", async () => {
+  const host = await fixture();
+  const env = { SLSKD_BASE_URL: host.url, SLSKD_API_KEY: "secret" };
+  try {
+    const blocked = await cli(["search", "delete", SEARCH_ID], env);
+    assert.equal(blocked.code, 2);
+    assert.equal(blocked.json.error.code, "ACKNOWLEDGEMENT_REQUIRED");
+    assert.equal(
+      host.calls.some((call) => call.method === "DELETE"),
+      false,
+    );
+
+    const deleted = await cli(["search", "delete", SEARCH_ID, "--yes"], env);
+    assert.equal(deleted.code, 0);
+    assert.deepEqual(deleted.json.result, { searchId: SEARCH_ID, deleted: true });
+
+    const missing = await cli(["search", "delete", SEARCH_ID, "--yes"], env);
+    assert.equal(missing.code, 7);
+    assert.equal(missing.json.error.code, "MISSING_SEARCH");
+  } finally {
+    await host.close();
+  }
+});
+
+test("search delete validates IDs and reports an ambiguous timeout without retrying", async () => {
+  const host = await fixture({ delaySearchDelete: 200 });
+  const env = { SLSKD_BASE_URL: host.url, SLSKD_API_KEY: "secret" };
+  try {
+    const invalid = await cli(["search", "delete", "not-a-uuid", "--yes"], env);
+    assert.equal(invalid.code, 2);
+    assert.equal(invalid.json.error.code, "INVALID_INPUT");
+    assert.equal(
+      host.calls.some((call) => call.method === "DELETE"),
+      false,
+    );
+
+    const timedOut = await cli(["search", "delete", SEARCH_ID, "--yes", "--timeout-ms", "50"], env);
+    assert.equal(timedOut.code, 9);
+    assert.equal(timedOut.json.error.code, "AMBIGUOUS_MUTATION");
+    assert.equal(host.calls.filter((call) => call.method === "DELETE").length, 1);
   } finally {
     await host.close();
   }

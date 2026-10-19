@@ -60,35 +60,38 @@ function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 }
 
-function errorForMissingOrExpired(search: JsonRecord): never {
-  const state = String(search.state ?? "").toLowerCase();
-  const code = state.includes("expired") ? "EXPIRED_SEARCH" : "MISSING_SEARCH";
-  const message =
-    code === "EXPIRED_SEARCH"
-      ? "The Search has expired; create a fresh Search."
-      : "No Search exists for the supplied searchId.";
-  throw new CliError(code, message, REMOTE_EXIT);
-}
-
-async function getSearch(ctx: Context, searchId: string): Promise<JsonRecord> {
+function canonicalSearchId(searchId: string): string {
   if (typeof searchId !== "string" || !isUuid(searchId)) {
     throw inputError("searchId must be the UUID returned by slskd search create or search list.");
   }
+  return searchId.toLowerCase();
+}
+
+function isNotFound(error: unknown): boolean {
+  return error instanceof CliError && error.code === "REMOTE" && error.message.includes("HTTP 404");
+}
+
+function missingSearchError(): CliError {
+  return new CliError("MISSING_SEARCH", "No Search exists for the supplied searchId.", REMOTE_EXIT);
+}
+
+function errorForMissingOrExpired(search: JsonRecord): never {
+  const state = String(search.state ?? "").toLowerCase();
+  if (!state.includes("expired")) throw missingSearchError();
+  throw new CliError(
+    "EXPIRED_SEARCH",
+    "The Search has expired; create a fresh Search.",
+    REMOTE_EXIT,
+  );
+}
+
+async function getSearch(ctx: Context, searchId: string): Promise<JsonRecord> {
+  searchId = canonicalSearchId(searchId);
   let value: unknown;
   try {
     value = await request(ctx, "GET", `searches/${encodeURIComponent(searchId)}`);
   } catch (error) {
-    if (
-      error instanceof CliError &&
-      error.code === "REMOTE" &&
-      error.message.includes("HTTP 404")
-    ) {
-      throw new CliError(
-        "MISSING_SEARCH",
-        "No Search exists for the supplied searchId.",
-        REMOTE_EXIT,
-      );
-    }
+    if (isNotFound(error)) throw missingSearchError();
     throw error;
   }
   const search = record(value);
@@ -170,6 +173,20 @@ export async function searchList(ctx: Context) {
       lockedFileCount: numberOrNull(search.lockedFileCount),
     };
   });
+}
+
+export async function searchDelete(
+  ctx: Context,
+  searchId: string,
+): Promise<{ searchId: string; deleted: true }> {
+  searchId = canonicalSearchId(searchId);
+  try {
+    await request(ctx, "DELETE", `searches/${encodeURIComponent(searchId)}`, undefined, true);
+  } catch (error) {
+    if (isNotFound(error)) throw missingSearchError();
+    throw error;
+  }
+  return { searchId, deleted: true };
 }
 
 function makeCandidateId(

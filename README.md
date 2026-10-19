@@ -66,6 +66,14 @@ node dist/cli.js search list
 
 Pass a listed `searchId` directly to `search candidates` or `transfer enqueue`. All commands use slskd's UUID as the canonical Search identifier; there is no separate CLI Search reference.
 
+Delete a Search and its stored responses with an explicit acknowledgement:
+
+```sh
+slskd search delete '<searchId>' --yes
+```
+
+The command returns `{searchId,deleted:true}`. A missing Search returns `MISSING_SEARCH`. As with other mutations, an interrupted or timed-out request returns `AMBIGUOUS_MUTATION`; run `search list` before deciding whether to retry.
+
 ## Workflow
 
 ```sh

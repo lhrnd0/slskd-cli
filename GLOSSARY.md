@@ -69,7 +69,7 @@ A cancellation request that reports a completed or already-cancelled transfer as
 _Avoid_: cancellation failure, repeated cancellation
 
 **State-changing command**:
-A CLI command that modifies the slskd instance, such as enqueuing, cancelling, clearing, or deleting a transfer. It requires its own literal `--yes` acknowledgement.
+A CLI command that modifies the slskd instance, such as enqueuing, cancelling, clearing, or deleting a Search or Transfer. It requires its own literal `--yes` acknowledgement.
 _Avoid_: query, inspection command
 
 **Workflow state**:
