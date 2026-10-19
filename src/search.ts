@@ -1,4 +1,4 @@
-import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { createHash } from "node:crypto";
 import { CliError, type Context, request } from "./core.js";
 
 export const DEFAULT_SEARCH_LIFETIME_SECONDS = 60;
@@ -12,15 +12,12 @@ type JsonRecord = Record<string, unknown>;
 export type SearchCreated = {
   searchId: string;
   lifetimeSeconds: number;
-  expiresAt: string;
 };
 
 export type Candidate = {
   candidateId: string;
-  /** Opaque client Search reference, suitable for use by subsequent CLI commands. */
+  /** The canonical slskd Search UUID, shared by all CLI commands. */
   searchId: string;
-  /** The upstream slskd UUID, required when building its transfer enqueue payload. */
-  slskdSearchId: string;
   username: string | null;
   path: string | null;
   filename: string | null;
@@ -60,44 +57,7 @@ function inputError(message: string): CliError {
 }
 
 function isUuid(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
-}
-
-function parseTimestamp(value: unknown): number | null {
-  if (typeof value !== "string") return null;
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-type SearchReference = { id: string; expiresAt: number };
-
-export function decodeSearchRef(ctx: Context, searchRef: string): SearchReference {
-  try {
-    const [data, signature, extra] = searchRef.split(".");
-    if (!data || !signature || extra) throw new Error("invalid token");
-    const expected = createHmac("sha256", ctx.apiKey).update(data).digest();
-    const actual = Buffer.from(signature, "base64url");
-    if (actual.length !== expected.length || !timingSafeEqual(actual, expected))
-      throw new Error("invalid signature");
-    const parsed = JSON.parse(Buffer.from(data, "base64url").toString("utf8")) as JsonRecord;
-    if (
-      typeof parsed.id === "string" &&
-      isUuid(parsed.id) &&
-      typeof parsed.expiresAt === "number" &&
-      Number.isSafeInteger(parsed.expiresAt)
-    ) {
-      return { id: parsed.id, expiresAt: parsed.expiresAt };
-    }
-  } catch {
-    /* handled below */
-  }
-  throw inputError("searchId must be an opaque Search reference returned by search create.");
-}
-
-function encodeSearchRef(ctx: Context, id: string, expiresAt: number): string {
-  const data = Buffer.from(JSON.stringify({ id, expiresAt }), "utf8").toString("base64url");
-  const signature = createHmac("sha256", ctx.apiKey).update(data).digest("base64url");
-  return `${data}.${signature}`;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 }
 
 function errorForMissingOrExpired(search: JsonRecord): never {
@@ -110,21 +70,13 @@ function errorForMissingOrExpired(search: JsonRecord): never {
   throw new CliError(code, message, REMOTE_EXIT);
 }
 
-async function getSearch(
-  ctx: Context,
-  searchId: string,
-): Promise<{ search: JsonRecord; reference: SearchReference }> {
-  const reference = decodeSearchRef(ctx, searchId);
-  if (Date.now() >= reference.expiresAt) {
-    throw new CliError(
-      "EXPIRED_SEARCH",
-      "The Search has expired; create a fresh Search.",
-      REMOTE_EXIT,
-    );
+async function getSearch(ctx: Context, searchId: string): Promise<JsonRecord> {
+  if (typeof searchId !== "string" || !isUuid(searchId)) {
+    throw inputError("searchId must be the UUID returned by slskd search create or search list.");
   }
   let value: unknown;
   try {
-    value = await request(ctx, "GET", `searches/${encodeURIComponent(reference.id)}`);
+    value = await request(ctx, "GET", `searches/${encodeURIComponent(searchId)}`);
   } catch (error) {
     if (
       error instanceof CliError &&
@@ -141,30 +93,17 @@ async function getSearch(
   }
   const search = record(value);
   if (!search.id) errorForMissingOrExpired(search);
-  return { search, reference };
-}
-
-function assertSearchFresh(search: JsonRecord, reference: SearchReference): void {
-  const startedAt = parseTimestamp(search.startedAt);
-  if (startedAt === null) {
-    throw new CliError(
-      "REMOTE",
-      "slskd returned a Search without a valid startedAt timestamp.",
-      REMOTE_EXIT,
-    );
+  if (typeof search.id !== "string" || search.id.toLowerCase() !== searchId.toLowerCase()) {
+    throw new CliError("REMOTE", "slskd returned a mismatched Search identifier.", REMOTE_EXIT);
   }
-  if (reference.expiresAt > startedAt + MAX_SEARCH_LIFETIME_SECONDS * 1000) {
-    throw inputError("searchId is not a valid Search reference.");
+  if (
+    String(search.state ?? "")
+      .toLowerCase()
+      .includes("expired")
+  ) {
+    errorForMissingOrExpired(search);
   }
-  if (Date.now() >= Math.min(reference.expiresAt, startedAt + MAX_SEARCH_LIFETIME_SECONDS * 1000)) {
-    throw new CliError(
-      "EXPIRED_SEARCH",
-      "The Search has expired; create a fresh Search.",
-      REMOTE_EXIT,
-    );
-  }
-  const state = String(search.state ?? "").toLowerCase();
-  if (state.includes("expired")) errorForMissingOrExpired(search);
+  return search;
 }
 
 /** Start one literal network Search on slskd. 0.26.1 interprets SearchTimeout in milliseconds. */
@@ -199,22 +138,16 @@ export async function searchCreate(
     ),
   );
   const id = stringOrNull(search.id);
-  const startedAt = parseTimestamp(search.startedAt);
-  if (!id || !isUuid(id) || startedAt === null) {
-    throw new CliError(
-      "REMOTE",
-      "slskd returned an invalid Search identifier or startedAt timestamp.",
-      REMOTE_EXIT,
-    );
+  if (!id || !isUuid(id)) {
+    throw new CliError("REMOTE", "slskd returned an invalid Search identifier.", REMOTE_EXIT);
   }
   return {
-    searchId: encodeSearchRef(ctx, id, startedAt + lifetimeSeconds * 1000),
+    searchId: id,
     lifetimeSeconds,
-    expiresAt: new Date(startedAt + lifetimeSeconds * 1000).toISOString(),
   };
 }
 
-/** List upstream Search summaries without reconstructing bounded client references. */
+/** List Search summaries using the same identifiers as create, candidates and enqueue. */
 export async function searchList(ctx: Context) {
   const value = await request(ctx, "GET", "searches");
   if (!Array.isArray(value)) {
@@ -223,11 +156,11 @@ export async function searchList(ctx: Context) {
   return value.map((item: unknown) => {
     const search = record(item);
     const id = stringOrNull(search.id);
-    if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+    if (!id || !isUuid(id)) {
       throw new CliError("REMOTE", "slskd returned an invalid Search identifier.", REMOTE_EXIT);
     }
     return {
-      slskdSearchId: id,
+      searchId: id,
       query: stringOrNull(search.searchText),
       state: stringOrNull(search.state),
       startedAt: stringOrNull(search.startedAt),
@@ -249,7 +182,7 @@ function makeCandidateId(
   return `cand_${createHash("sha256").update(scope).digest("base64url").slice(0, 22)}`;
 }
 
-function candidatesFromResponses(searchRef: string, searchId: string, value: unknown): Candidate[] {
+function candidatesFromResponses(searchId: string, value: unknown): Candidate[] {
   if (!Array.isArray(value)) {
     throw new CliError("REMOTE", "slskd returned an invalid Search response list.", REMOTE_EXIT);
   }
@@ -270,8 +203,7 @@ function candidatesFromResponses(searchRef: string, searchId: string, value: unk
         const isLocked = boolOrNull(file.isLocked) ?? locked;
         candidates.push({
           candidateId: makeCandidateId(searchId, username, path, size),
-          searchId: searchRef,
-          slskdSearchId: searchId,
+          searchId,
           username,
           path,
           filename: path === null ? null : (path.split(/[\\/]/).pop() ?? null),
@@ -294,14 +226,10 @@ function candidatesFromResponses(searchRef: string, searchId: string, value: unk
 }
 
 export async function searchCandidates(ctx: Context, searchId: string): Promise<Candidate[]> {
-  const { search, reference } = await getSearch(ctx, searchId);
-  assertSearchFresh(search, reference);
-  const responses = await request(
-    ctx,
-    "GET",
-    `searches/${encodeURIComponent(reference.id)}/responses`,
-  );
-  return candidatesFromResponses(searchId, reference.id, responses);
+  const search = await getSearch(ctx, searchId);
+  const id = (search.id as string).toLowerCase();
+  const responses = await request(ctx, "GET", `searches/${encodeURIComponent(id)}/responses`);
+  return candidatesFromResponses(id, responses);
 }
 
 /** Resolve a scoped candidate ID by re-reading slskd, keeping IDs stateless and deterministic. */

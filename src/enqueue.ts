@@ -26,6 +26,7 @@ export async function transferEnqueue(
 }> {
   requireYes(yes);
   const candidate = await resolveCandidate(ctx, searchId, candidateId);
+  searchId = candidate.searchId;
   if (!candidate.username || !candidate.path || candidate.size === null || candidate.isLocked) {
     throw new CliError("INVALID_CANDIDATE", "The selected Candidate cannot be enqueued.", 2);
   }
@@ -45,7 +46,7 @@ export async function transferEnqueue(
       "/transfers/downloads/batches",
       {
         id,
-        searchId: candidate.slskdSearchId,
+        searchId,
         username: candidate.username,
         files: [{ filename: candidate.path, size: candidate.size }],
       },

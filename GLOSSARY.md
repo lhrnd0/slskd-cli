@@ -45,12 +45,12 @@ A slskd-backed discovery operation whose candidates are retrieved and inspected 
 _Avoid_: automatic acquisition, recommendation
 
 **Search identifier**:
-The opaque reference returned when a search is created and supplied when its candidates are later queried.
+The UUID assigned by slskd to a Search, shared when creating or listing Searches, querying Candidates, and enqueuing a selection.
 _Avoid_: search query, keyword string
 
 **Expired search**:
-A search whose configured bounded lifetime has elapsed and whose candidates must no longer be used; it defaults to 60 seconds, and an agent creates a new search to obtain current availability.
-_Avoid_: current search, reusable query
+A Search reported as expired by slskd, whose Candidates are no longer available for use.
+_Avoid_: completed search, timed-out search
 
 **Search query**:
 The single literal free-text string supplied by the calling agent when it creates a search; the CLI does not rewrite it or infer filters.

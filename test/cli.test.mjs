@@ -5,7 +5,6 @@ import { execFile } from "node:child_process";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createHmac } from "node:crypto";
 
 const SEARCH_ID = "11111111-1111-4111-8111-111111111111";
 const TRANSFER_ID = "22222222-2222-4222-8222-222222222222";
@@ -14,7 +13,8 @@ const PATH = "Albums\\artist\\song.flac";
 async function fixture(options = {}) {
   const calls = [];
   let transfer = null;
-  const startedAt = new Date().toISOString();
+  const startedAt = options.startedAt ?? new Date().toISOString();
+  const searchId = options.searchId ?? SEARCH_ID;
   const server = createServer(async (req, res) => {
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
@@ -34,10 +34,13 @@ async function fixture(options = {}) {
     if (path === "/api/v0/searches" && req.method === "GET")
       return send(200, options.searches ?? []);
     if (path === "/api/v0/searches" && req.method === "POST")
-      return send(200, { id: SEARCH_ID, startedAt });
-    if (path === `/api/v0/searches/${SEARCH_ID}`)
-      return send(200, { id: SEARCH_ID, startedAt, state: "InProgress" });
-    if (path === `/api/v0/searches/${SEARCH_ID}/responses`)
+      return send(200, { id: searchId, startedAt });
+    if (path.toLowerCase() === `/api/v0/searches/${searchId}`)
+      return send(
+        options.searchStatus ?? 200,
+        options.search ?? { id: searchId, startedAt, state: "InProgress" },
+      );
+    if (path === `/api/v0/searches/${searchId}/responses`)
       return send(200, [
         {
           username: "alice",
@@ -128,6 +131,8 @@ test("packaged command completes and resumes a selected Workflow", async () => {
     const created = await cli(["search", "create", "--query", "  exact  query  "], env);
     assert.equal(created.code, 0);
     assert.equal(created.json.result.lifetimeSeconds, 60);
+    assert.equal(created.json.result.searchId, SEARCH_ID);
+    assert.equal("expiresAt" in created.json.result, false);
     const searchPayload = JSON.parse(
       host.calls.find((c) => c.method === "POST" && c.path === "/api/v0/searches").body,
     );
@@ -138,6 +143,8 @@ test("packaged command completes and resumes a selected Workflow", async () => {
     const inspected = await cli(["search", "candidates", searchId], env);
     assert.equal(inspected.code, 0);
     const candidate = inspected.json.result.candidates[0];
+    assert.equal(candidate.searchId, SEARCH_ID);
+    assert.equal("slskdSearchId" in candidate, false);
     assert.deepEqual(
       [
         candidate.username,
@@ -248,7 +255,7 @@ test("incompatible instance and mutation acknowledgements have stable errors", a
   }
 });
 
-test("expired, mismatched, and missing Candidates never enqueue", async () => {
+test("invalid Search identifiers and missing Candidates never enqueue", async () => {
   const host = await fixture();
   const env = { SLSKD_BASE_URL: host.url, SLSKD_API_KEY: "secret" };
   try {
@@ -261,12 +268,11 @@ test("expired, mismatched, and missing Candidates never enqueue", async () => {
       env,
     );
     assert.equal(missing.json.error.code, "MISSING_CANDIDATE");
-    const data = Buffer.from(
-      JSON.stringify({ id: SEARCH_ID, expiresAt: Date.now() - 1000 }),
-    ).toString("base64url");
-    const stale = `${data}.${createHmac("sha256", "secret").update(data).digest("base64url")}`;
-    const expired = await cli(["transfer", "enqueue", stale, candidateId, "--yes"], env);
-    assert.equal(expired.json.error.code, "EXPIRED_SEARCH");
+    for (const invalidId of ["not-a-uuid", "old-signed.search-reference", "../searches"]) {
+      const invalid = await cli(["transfer", "enqueue", invalidId, candidateId, "--yes"], env);
+      assert.equal(invalid.code, 2);
+      assert.equal(invalid.json.error.code, "INVALID_INPUT");
+    }
     assert.equal(
       host.calls.filter((c) => c.path === "/api/v0/transfers/downloads/batches").length,
       0,
@@ -390,7 +396,7 @@ test("version prereleases and read request timeouts are distinct failures", asyn
   }
 });
 
-test("search list reports existing Searches without fetching Candidates or minting references", async () => {
+test("search list reports existing Searches without fetching Candidates", async () => {
   const host = await fixture({
     searches: [
       {
@@ -417,7 +423,7 @@ test("search list reports existing Searches without fetching Candidates or minti
       result: {
         searches: [
           {
-            slskdSearchId: SEARCH_ID,
+            searchId: SEARCH_ID,
             query: "artist album",
             state: "Completed, TimedOut",
             startedAt: "2026-01-01T00:00:00Z",
@@ -448,7 +454,7 @@ test("search list handles an empty instance and unavailable metadata", async () 
       [{ id: SEARCH_ID }],
       [
         {
-          slskdSearchId: SEARCH_ID,
+          searchId: SEARCH_ID,
           query: null,
           state: null,
           startedAt: null,
@@ -502,7 +508,102 @@ test("search list accepts upstream GUIDs without RFC version or variant bits", a
       SLSKD_API_KEY: "secret",
     });
     assert.equal(result.code, 0);
-    assert.equal(result.json.result.searches[0].slskdSearchId, id);
+    assert.equal(result.json.result.searches[0].searchId, id);
+  } finally {
+    await host.close();
+  }
+});
+
+test("a listed completed Search can be inspected and enqueued with its slskd UUID", async () => {
+  const host = await fixture({
+    startedAt: "2020-01-01T00:00:00Z",
+    search: { id: SEARCH_ID, state: "Completed, TimedOut" },
+    searches: [{ id: SEARCH_ID, searchText: "artist album" }],
+  });
+  const env = { SLSKD_BASE_URL: host.url, SLSKD_API_KEY: "another-api-key" };
+  try {
+    const listed = await cli(["search", "list"], env);
+    assert.equal(listed.code, 0);
+    const searchId = listed.json.result.searches[0].searchId;
+    assert.equal(searchId, SEARCH_ID);
+    const inspected = await cli(["search", "candidates", searchId], env);
+    assert.equal(inspected.code, 0);
+    const candidate = inspected.json.result.candidates[0];
+    assert.equal(candidate.searchId, searchId);
+    assert.equal("slskdSearchId" in candidate, false);
+    const enqueued = await cli(
+      ["transfer", "enqueue", searchId, candidate.candidateId, "--yes"],
+      env,
+    );
+    assert.equal(enqueued.code, 0);
+    assert.equal(enqueued.json.result.searchId, searchId);
+    const payload = JSON.parse(
+      host.calls.find((call) => call.path === "/api/v0/transfers/downloads/batches").body,
+    );
+    assert.equal(payload.searchId, searchId);
+  } finally {
+    await host.close();
+  }
+});
+
+test("slskd controls missing and expired Searches before enqueue", async () => {
+  for (const [options, code] of [
+    [{ searchStatus: 404, search: {} }, "MISSING_SEARCH"],
+    [{ search: { id: SEARCH_ID, state: "Expired" } }, "EXPIRED_SEARCH"],
+    [{ search: { id: TRANSFER_ID } }, "REMOTE"],
+  ]) {
+    const host = await fixture(options);
+    try {
+      const env = { SLSKD_BASE_URL: host.url, SLSKD_API_KEY: "secret" };
+      for (const args of [
+        ["search", "candidates", SEARCH_ID],
+        ["transfer", "enqueue", SEARCH_ID, "cand_AAAAAAAAAAAAAAAAAAAAAA", "--yes"],
+      ]) {
+        const result = await cli(args, env);
+        assert.equal(result.code, 7);
+        assert.equal(result.json.error.code, code);
+      }
+      assert.equal(
+        host.calls.some((call) => call.method === "POST"),
+        false,
+      );
+      assert.equal(
+        host.calls.some((call) => call.path.endsWith("/responses")),
+        false,
+      );
+    } finally {
+      await host.close();
+    }
+  }
+});
+
+test("canonical Search GUIDs work across API keys and UUID casing", async () => {
+  const searchId = "abcdefab-cdef-0000-0000-abcdefabcdef";
+  const host = await fixture({ searchId });
+  try {
+    const env = { SLSKD_BASE_URL: host.url, SLSKD_API_KEY: "first-key" };
+    const created = await cli(["search", "create", "--query", "song"], env);
+    assert.equal(created.code, 0);
+    assert.equal(created.json.result.searchId, searchId);
+    const first = await cli(["search", "candidates", searchId], env);
+    const second = await cli(["search", "candidates", searchId.toUpperCase()], {
+      ...env,
+      SLSKD_API_KEY: "second-key",
+    });
+    assert.equal(first.code, 0);
+    assert.equal(second.code, 0);
+    assert.deepEqual(second.json.result.candidates, first.json.result.candidates);
+    const candidate = second.json.result.candidates[0];
+    const enqueued = await cli(
+      ["transfer", "enqueue", searchId.toUpperCase(), candidate.candidateId, "--yes"],
+      env,
+    );
+    assert.equal(enqueued.code, 0);
+    assert.equal(enqueued.json.result.searchId, searchId);
+    const payload = JSON.parse(
+      host.calls.find((call) => call.path === "/api/v0/transfers/downloads/batches").body,
+    );
+    assert.equal(payload.searchId, searchId);
   } finally {
     await host.close();
   }
