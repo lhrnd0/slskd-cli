@@ -2,13 +2,18 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { execFile } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const SEARCH_ID = "11111111-1111-4111-8111-111111111111";
 const TRANSFER_ID = "22222222-2222-4222-8222-222222222222";
 const PATH = "Albums\\artist\\song.flac";
+
+test("package exposes the slskd executable", () => {
+  const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url)));
+  assert.deepEqual(packageJson.bin, { slskd: "dist/cli.js" });
+});
 
 async function fixture(options = {}) {
   const calls = [];
@@ -96,7 +101,7 @@ async function fixture(options = {}) {
   };
 }
 
-function cli(args, env = {}) {
+function rawCli(args, env = {}) {
   return new Promise((resolve, reject) => {
     execFile(
       process.execPath,
@@ -114,15 +119,52 @@ function cli(args, env = {}) {
       },
       (error, stdout, stderr) => {
         if (error && error.killed) return reject(error);
-        try {
-          resolve({ code: error?.code ?? 0, json: JSON.parse(stdout), stderr });
-        } catch (parseError) {
-          reject(parseError);
-        }
+        resolve({ code: error?.code ?? 0, stdout, stderr });
       },
     );
   });
 }
+
+async function cli(args, env = {}) {
+  const result = await rawCli(args, env);
+  return { code: result.code, json: JSON.parse(result.stdout), stderr: result.stderr };
+}
+
+test("help covers the root, command groups, and every command without configuration", async () => {
+  const topics = [
+    [],
+    ["check"],
+    ["search"],
+    ["search", "list"],
+    ["search", "create"],
+    ["search", "candidates"],
+    ["transfer"],
+    ["transfer", "enqueue"],
+    ["transfer", "show"],
+    ["transfer", "cancel"],
+    ["transfer", "clear"],
+    ["transfer", "delete"],
+  ];
+  for (const topic of topics) {
+    for (const args of [
+      [...topic, "--help"],
+      ["help", ...topic],
+    ]) {
+      const result = await rawCli(args);
+      assert.equal(result.code, 0, args.join(" "));
+      assert.match(result.stdout, /^Usage: slskd/m, args.join(" "));
+      assert.equal(result.stderr, "", args.join(" "));
+    }
+  }
+  for (const args of [[], ["search"], ["transfer"]]) {
+    const result = await rawCli(args);
+    assert.equal(result.code, 0, args.join(" "));
+    assert.match(result.stdout, /^Usage: slskd/m, args.join(" "));
+  }
+  const unknown = await cli(["help", "unknown"]);
+  assert.equal(unknown.code, 2);
+  assert.equal(unknown.json.error.code, "INVALID_INPUT");
+});
 
 test("packaged command completes and resumes a selected Workflow", async () => {
   const host = await fixture();

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Agent-first command-line client for slskd",
   "bin": {
-    "slskd-cli": "dist/cli.js"
+    "slskd": "dist/cli.js"
   },
   "files": [
     "dist"

@@ -18,7 +18,20 @@ The project declares its pnpm version in `package.json`. Run `corepack enable` o
 
 Run `pnpm format` to apply the repository's oxfmt rules. `pnpm lint:fix` applies safe oxlint fixes.
 
-The npm package exposes `slskd-cli` from `dist/cli.js`. After publication, install it with `pnpm add --global slskd-cli`. During development, use `node dist/cli.js` in place of `slskd-cli` below.
+The npm package exposes `slskd` from `dist/cli.js`. After publication, install it with `pnpm add --global slskd-cli`. During development, use `node dist/cli.js` in place of `slskd` below.
+
+## Help
+
+Help is available offline at the root, command-group, and individual-command levels. Both forms are supported:
+
+```sh
+node dist/cli.js --help
+node dist/cli.js search --help
+node dist/cli.js transfer enqueue --help
+node dist/cli.js help search create
+```
+
+Running the CLI, `search`, or `transfer` without further arguments also displays the relevant help. Help is plain text and does not read the Connection profile or contact slskd. Operational commands continue to emit exactly one JSON object.
 
 ## Connection profile
 
@@ -38,10 +51,10 @@ Set `SLSKD_CLI_CONFIG` to use a different profile file. `SLSKD_BASE_URL`, `SLSKD
 `check` reports `apiKeyRole: "unverified"` to make that limit explicit. Verify the role in your slskd configuration before allowing the CLI to enqueue downloads.
 
 ```sh
-slskd-cli check
+slskd check
 ```
 
-All commands emit one JSON object on stdout. They never prompt or print the API key. Success uses `{"ok":true,"result":...}`; failure uses `{"ok":false,"error":{"code":"...","message":"..."}}`. stderr is reserved for process level failures.
+Operational commands emit one JSON object on stdout. They never prompt or print the API key. Success uses `{"ok":true,"result":...}`; failure uses `{"ok":false,"error":{"code":"...","message":"..."}}`. stderr is reserved for process level failures.
 
 ## List searches
 
@@ -56,10 +69,10 @@ Pass a listed `searchId` directly to `search candidates` or `transfer enqueue`. 
 ## Workflow
 
 ```sh
-slskd-cli search create --query 'artist album' --lifetime-seconds 60
-slskd-cli search candidates '<searchId>'
-slskd-cli transfer enqueue '<searchId>' '<candidateId>' --yes
-slskd-cli transfer show '<username>' '<transferId>'
+slskd search create --query 'artist album' --lifetime-seconds 60
+slskd search candidates '<searchId>'
+slskd transfer enqueue '<searchId>' '<candidateId>' --yes
+slskd transfer show '<username>' '<transferId>'
 ```
 
 `search create` passes the query literally to slskd. Lifetime is an integer from **5 to 300 seconds**, default **60**. For slskd 0.26.1, the CLI sends the API timeout in milliseconds because that release interprets the field in milliseconds despite describing it as seconds. The returned `searchId` is slskd's UUID, identical to the ID in `search list`. The lifetime controls response collection; completed Searches and their Candidates remain usable while slskd retains them. The CLI does not impose a separate age limit or store Search state. `search create` returns `{searchId,lifetimeSeconds}`. Previous signed CLI Search references are no longer accepted; use `search list` to obtain the canonical UUID. `search candidates` returns `{searchId,candidates:[...]}`. Each Candidate includes an opaque `candidateId`, username, remote `path`, basename `filename`, extension, byte `size`, queue length, free slot status, upload speed, available audio attributes, and `null` for unavailable metadata. Candidates are never ranked or selected by the CLI.
@@ -71,9 +84,9 @@ slskd-cli transfer show '<username>' '<transferId>'
 ## Transfer mutations
 
 ```sh
-slskd-cli transfer cancel '<username>' '<transferId>' --yes
-slskd-cli transfer clear --yes
-slskd-cli transfer delete '<username>' '<transferId>' --yes
+slskd transfer cancel '<username>' '<transferId>' --yes
+slskd transfer clear --yes
+slskd transfer delete '<username>' '<transferId>' --yes
 ```
 
 Every mutation needs its own literal `--yes`. `cancel` leaves completed or already cancelled Transfers unchanged. `clear` invokes slskd's **global clear completed downloads** endpoint. `delete` removes one Transfer record through slskd's `remove=true` endpoint, which may cancel an active Transfer first. These commands do not act on downloaded files.

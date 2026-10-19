@@ -6,7 +6,110 @@ import { transferCancel, transferClear, transferDelete, transferInspect } from "
 
 type Flags = Record<string, string | boolean>;
 const VALUE_FLAGS = new Set(["base-url", "api-key", "timeout-ms", "query", "lifetime-seconds"]);
-const ALL_FLAGS = new Set([...VALUE_FLAGS, "yes"]);
+const ALL_FLAGS = new Set([...VALUE_FLAGS, "help", "yes"]);
+
+class HelpResult {
+  constructor(readonly text: string) {}
+}
+
+const HELP = new Map<string, string>([
+  [
+    "",
+    `Usage: slskd <command> [options]
+
+Commands:
+  check                         Check connectivity and slskd compatibility
+  search list                   List existing searches
+  search create                 Create a search
+  search candidates             List candidates for a search
+  transfer enqueue              Enqueue a candidate for download
+  transfer show                 Show a download transfer
+  transfer cancel               Cancel a download transfer
+  transfer clear                Clear completed downloads
+  transfer delete               Delete a transfer record
+
+Run "slskd <command> --help" for command-specific help.`,
+  ],
+  [
+    "check",
+    `Usage: slskd check [connection options]\n\nCheck connectivity and slskd compatibility.`,
+  ],
+  [
+    "search",
+    `Usage: slskd search <command>
+
+Commands:
+  list                           List existing searches
+  create                         Create a search
+  candidates <searchId>          List candidates for a search`,
+  ],
+  [
+    "search list",
+    `Usage: slskd search list [connection options]\n\nList active and completed searches stored in slskd.`,
+  ],
+  [
+    "search create",
+    `Usage: slskd search create --query <text> [--lifetime-seconds <seconds>] [connection options]
+
+Create a literal slskd search. Lifetime must be between 5 and 300 seconds and defaults to 60.`,
+  ],
+  [
+    "search candidates",
+    `Usage: slskd search candidates <searchId> [connection options]
+
+List normalized candidates using the slskd UUID from search create or search list.`,
+  ],
+  [
+    "transfer",
+    `Usage: slskd transfer <command>
+
+Commands:
+  enqueue <searchId> <candidateId> --yes
+  show <username> <transferId>
+  cancel <username> <transferId> --yes
+  clear --yes
+  delete <username> <transferId> --yes`,
+  ],
+  [
+    "transfer enqueue",
+    `Usage: slskd transfer enqueue <searchId> <candidateId> --yes [connection options]
+
+Enqueue a selected candidate. A safe retry returns the existing matching transfer.`,
+  ],
+  [
+    "transfer show",
+    `Usage: slskd transfer show <username> <transferId> [connection options]
+
+Show normalized state and progress for a download transfer.`,
+  ],
+  [
+    "transfer cancel",
+    `Usage: slskd transfer cancel <username> <transferId> --yes [connection options]
+
+Cancel a download transfer. Completed or already cancelled transfers remain unchanged.`,
+  ],
+  [
+    "transfer clear",
+    `Usage: slskd transfer clear --yes [connection options]
+
+Clear all completed download records in slskd.`,
+  ],
+  [
+    "transfer delete",
+    `Usage: slskd transfer delete <username> <transferId> --yes [connection options]
+
+Delete one transfer record. An active transfer may be cancelled first.`,
+  ],
+]);
+
+function helpFor(words: string[], flags: Flags): HelpResult | undefined {
+  const helpCommand = words[0] === "help";
+  if (!helpCommand && flags.help !== true) return undefined;
+  const topic = (helpCommand ? words.slice(1) : words).join(" ");
+  const text = HELP.get(topic);
+  if (text === undefined) throw new CliError("INVALID_INPUT", "Unknown help topic.", 2);
+  return new HelpResult(`${text}\n`);
+}
 
 function parse(argv: string[]): { words: string[]; flags: Flags } {
   const words: string[] = [];
@@ -20,7 +123,7 @@ function parse(argv: string[]): { words: string[]; flags: Flags } {
     const name = arg.slice(2);
     if (!ALL_FLAGS.has(name) || name in flags)
       throw new CliError("INVALID_INPUT", "Unknown or repeated command flag.", 2);
-    if (name === "yes") {
+    if (name === "help" || name === "yes") {
       flags[name] = true;
       continue;
     }
@@ -40,6 +143,16 @@ function requireWords(words: string[], count: number): void {
 
 async function run(argv: string[]): Promise<unknown> {
   const { words, flags } = parse(argv);
+  if (words.length === 0 && Object.keys(flags).length === 0)
+    return new HelpResult(`${HELP.get("")}\n`);
+  const help = helpFor(words, flags);
+  if (help) return help;
+  if (
+    (words.length === 1 && words[0] === "search") ||
+    (words.length === 1 && words[0] === "transfer")
+  ) {
+    return new HelpResult(`${HELP.get(words[0])}\n`);
+  }
   const command = words.slice(0, 2).join(" ");
   const isMutation =
     command === "transfer enqueue" ||
@@ -105,7 +218,9 @@ async function run(argv: string[]): Promise<unknown> {
 
 try {
   const value = await run(process.argv.slice(2));
-  process.stdout.write(`${JSON.stringify({ ok: true, result: value })}\n`);
+  process.stdout.write(
+    value instanceof HelpResult ? value.text : `${JSON.stringify({ ok: true, result: value })}\n`,
+  );
 } catch (error) {
   const failure =
     error instanceof CliError ? error : new CliError("REMOTE", "Unexpected CLI failure.", 7);
