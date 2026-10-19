@@ -214,6 +214,31 @@ export async function searchCreate(
   };
 }
 
+/** List upstream Search summaries without reconstructing bounded client references. */
+export async function searchList(ctx: Context) {
+  const value = await request(ctx, "GET", "searches");
+  if (!Array.isArray(value)) {
+    throw new CliError("REMOTE", "slskd returned an invalid Search list.", REMOTE_EXIT);
+  }
+  return value.map((item: unknown) => {
+    const search = record(item);
+    const id = stringOrNull(search.id);
+    if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+      throw new CliError("REMOTE", "slskd returned an invalid Search identifier.", REMOTE_EXIT);
+    }
+    return {
+      slskdSearchId: id,
+      query: stringOrNull(search.searchText),
+      state: stringOrNull(search.state),
+      startedAt: stringOrNull(search.startedAt),
+      endedAt: stringOrNull(search.endedAt),
+      responseCount: numberOrNull(search.responseCount),
+      fileCount: numberOrNull(search.fileCount),
+      lockedFileCount: numberOrNull(search.lockedFileCount),
+    };
+  });
+}
+
 function makeCandidateId(
   searchId: string,
   username: string | null,

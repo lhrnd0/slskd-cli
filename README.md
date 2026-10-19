@@ -43,6 +43,16 @@ slskd-cli check
 
 All commands emit one JSON object on stdout. They never prompt or print the API key. Success uses `{"ok":true,"result":...}`; failure uses `{"ok":false,"error":{"code":"...","message":"..."}}`. stderr is reserved for process level failures.
 
+## List searches
+
+```sh
+node dist/cli.js search list
+```
+
+`search list` returns `{searches:[...]}` for active and completed Searches stored in slskd, including old Searches. Each summary contains `slskdSearchId` (the upstream UUID), `query`, `state`, `startedAt`, `endedAt`, `responseCount`, `fileCount`, and `lockedFileCount`. Unavailable metadata is `null`; an empty instance returns an empty array. It does not fetch Candidates.
+
+The upstream UUID cannot be passed to `search candidates` or `transfer enqueue`. Keep the opaque `searchId` returned by `search create` for those commands. slskd does not expose the configured lifetime in its summaries, so listing cannot recover that reference or renew an expired Search.
+
 ## Workflow
 
 ```sh

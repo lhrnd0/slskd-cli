@@ -31,6 +31,8 @@ async function fixture(options = {}) {
         await new Promise((resolve) => setTimeout(resolve, options.delayVersion));
       return send(200, options.version ?? "0.26.1");
     }
+    if (path === "/api/v0/searches" && req.method === "GET")
+      return send(200, options.searches ?? []);
     if (path === "/api/v0/searches" && req.method === "POST")
       return send(200, { id: SEARCH_ID, startedAt });
     if (path === `/api/v0/searches/${SEARCH_ID}`)
@@ -385,5 +387,123 @@ test("version prereleases and read request timeouts are distinct failures", asyn
     assert.equal(result.json.error.code, "TIMEOUT");
   } finally {
     await slow.close();
+  }
+});
+
+test("search list reports existing Searches without fetching Candidates or minting references", async () => {
+  const host = await fixture({
+    searches: [
+      {
+        id: SEARCH_ID,
+        searchText: "artist album",
+        state: "Completed, TimedOut",
+        startedAt: "2026-01-01T00:00:00Z",
+        endedAt: "2026-01-01T00:01:00Z",
+        responseCount: 3,
+        fileCount: 12,
+        lockedFileCount: 2,
+        responses: [{ username: "private-peer" }],
+      },
+    ],
+  });
+  try {
+    const result = await cli(["search", "list"], {
+      SLSKD_BASE_URL: host.url,
+      SLSKD_API_KEY: "secret",
+    });
+    assert.equal(result.code, 0);
+    assert.deepEqual(result.json, {
+      ok: true,
+      result: {
+        searches: [
+          {
+            slskdSearchId: SEARCH_ID,
+            query: "artist album",
+            state: "Completed, TimedOut",
+            startedAt: "2026-01-01T00:00:00Z",
+            endedAt: "2026-01-01T00:01:00Z",
+            responseCount: 3,
+            fileCount: 12,
+            lockedFileCount: 2,
+          },
+        ],
+      },
+    });
+    assert.deepEqual(
+      host.calls.map(({ method, path }) => [method, path]),
+      [
+        ["GET", "/api/v0/application/version"],
+        ["GET", "/api/v0/searches"],
+      ],
+    );
+  } finally {
+    await host.close();
+  }
+});
+
+test("search list handles an empty instance and unavailable metadata", async () => {
+  for (const [searches, expected] of [
+    [[], []],
+    [
+      [{ id: SEARCH_ID }],
+      [
+        {
+          slskdSearchId: SEARCH_ID,
+          query: null,
+          state: null,
+          startedAt: null,
+          endedAt: null,
+          responseCount: null,
+          fileCount: null,
+          lockedFileCount: null,
+        },
+      ],
+    ],
+  ]) {
+    const host = await fixture({ searches });
+    try {
+      const result = await cli(["search", "list"], {
+        SLSKD_BASE_URL: host.url,
+        SLSKD_API_KEY: "secret",
+      });
+      assert.equal(result.code, 0);
+      assert.deepEqual(result.json.result, { searches: expected });
+    } finally {
+      await host.close();
+    }
+  }
+});
+
+test("search list rejects malformed remote lists and invalid command arguments", async () => {
+  for (const searches of [{}, [null], [{ id: "invalid" }]]) {
+    const host = await fixture({ searches });
+    const env = { SLSKD_BASE_URL: host.url, SLSKD_API_KEY: "secret" };
+    try {
+      const result = await cli(["search", "list"], env);
+      assert.equal(result.code, 7);
+      assert.equal(result.json.error.code, "REMOTE");
+      for (const extra of [["extra"], ["--query", "song"], ["--yes"]]) {
+        const invalid = await cli(["search", "list", ...extra], env);
+        assert.equal(invalid.code, 2);
+        assert.equal(invalid.json.error.code, "INVALID_INPUT");
+      }
+    } finally {
+      await host.close();
+    }
+  }
+});
+
+test("search list accepts upstream GUIDs without RFC version or variant bits", async () => {
+  const id = "00000000-0000-0000-0000-000000000000";
+  const host = await fixture({ searches: [{ id }] });
+  try {
+    const result = await cli(["search", "list"], {
+      SLSKD_BASE_URL: host.url,
+      SLSKD_API_KEY: "secret",
+    });
+    assert.equal(result.code, 0);
+    assert.equal(result.json.result.searches[0].slskdSearchId, id);
+  } finally {
+    await host.close();
   }
 });

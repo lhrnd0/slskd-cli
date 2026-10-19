@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { CliError, compatible, resolveContext, requireYes } from "./core.js";
-import { searchCreate, searchCandidates } from "./search.js";
+import { searchCreate, searchCandidates, searchList } from "./search.js";
 import { transferEnqueue } from "./enqueue.js";
 import { transferCancel, transferClear, transferDelete, transferInspect } from "./transfer.js";
 
@@ -56,6 +56,7 @@ async function run(argv: string[]): Promise<unknown> {
   if (
     ![
       "check",
+      "search list",
       "search create",
       "search candidates",
       "transfer enqueue",
@@ -73,6 +74,10 @@ async function run(argv: string[]): Promise<unknown> {
   if (words[0] === "check") {
     requireWords(words, 1);
     return verified;
+  }
+  if (command === "search list") {
+    requireWords(words, 2);
+    return { searches: await searchList(ctx) };
   }
   if (command === "search create") {
     requireWords(words, 2);
