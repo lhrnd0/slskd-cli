@@ -11,6 +11,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "commitlint": "commitlint",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
     "lint": "oxlint . --deny-warnings",
@@ -23,10 +24,13 @@
     "smol-toml": "^1.3.1"
   },
   "devDependencies": {
+    "@colbymchenry/codegraph": "^1.6.2",
+    "@commitlint/cli": "^21.2.4",
+    "@commitlint/config-conventional": "^21.2.4",
     "@types/node": "^24.0.0",
     "oxfmt": "^0.73.0",
     "oxlint": "^1.88.0",
-    "typescript": "^5.9.0"
+    "typescript": "^7.0.2"
   },
   "engines": {
     "node": ">=24"
