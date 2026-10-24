@@ -1,6 +1,6 @@
 # slskd-cli
 
-`slskd-cli` is a non-interactive JSON command line interface for one trusted [slskd](https://github.com/slskd/slskd) instance. It supports slskd **0.26.1 or later** and Node.js **24 or later**. The CLI keeps no Workflow database and never moves or deletes downloaded files.
+`slskd-cli` is a non-interactive JSON command line interface for one trusted [slskd](https://github.com/slskd/slskd) instance. The npm package installs the `slskd` command. It supports slskd **0.26.1 or later** and Node.js **24 or later**. The CLI keeps no Workflow database and never moves or deletes downloaded files.
 
 ## Install and build
 
@@ -18,7 +18,26 @@ The project declares its pnpm version in `package.json`. Run `corepack enable` o
 
 Run `pnpm format` to apply the repository's oxfmt rules. `pnpm lint:fix` applies safe oxlint fixes.
 
-The npm package exposes `slskd` from `dist/cli.js`. After publication, install it with `pnpm add --global slskd-cli`. During development, use `node dist/cli.js` in place of `slskd` below.
+Contributions use [Conventional Commits](CONTRIBUTING.md#commit-messages). The repository's Git hook validates commit messages locally.
+
+## Run after building
+
+After `pnpm build`, run the generated entry point directly from the project directory:
+
+```sh
+node dist/cli.js --help
+node dist/cli.js check
+node dist/cli.js search create --query 'artist album'
+```
+
+`dist` is a directory, so Node must be given the complete `dist/cli.js` path. To make the `slskd` command available globally from a local checkout, link the package:
+
+```sh
+pnpm link --global
+slskd --help
+```
+
+The npm package exposes `slskd` from `dist/cli.js`. After publication, install it with `pnpm add --global slskd-cli`. During development, either use `node dist/cli.js` in place of `slskd` below or create the global link shown above.
 
 ## Help
 
