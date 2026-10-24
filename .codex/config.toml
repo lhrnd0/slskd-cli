@@ -1,2 +1,6 @@
 [features]
 hooks = true
+
+[mcp_servers.codegraph]
+command = "/Users/lhrinaldi/Library/pnpm/bin/pnpm"
+args = ["exec", "codegraph", "serve", "--mcp"]
