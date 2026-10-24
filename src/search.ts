@@ -3,6 +3,8 @@ import { CliError, type Context, request } from "./core.js";
 
 export const DEFAULT_SEARCH_LIFETIME_SECONDS = 60;
 export const MAX_SEARCH_LIFETIME_SECONDS = 300;
+export const DEFAULT_POLL_INTERVAL_MS = 1000;
+export const DEFAULT_WATCH_TIMEOUT_SECONDS = 300;
 
 const INVALID_INPUT_EXIT = 2;
 const REMOTE_EXIT = 7;
@@ -60,7 +62,7 @@ function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 }
 
-function canonicalSearchId(searchId: string): string {
+export function canonicalSearchId(searchId: string): string {
   if (typeof searchId !== "string" || !isUuid(searchId)) {
     throw inputError("searchId must be the UUID returned by slskd search create or search list.");
   }
@@ -247,6 +249,124 @@ export async function searchCandidates(ctx: Context, searchId: string): Promise<
   const id = (search.id as string).toLowerCase();
   const responses = await request(ctx, "GET", `searches/${encodeURIComponent(id)}/responses`);
   return candidatesFromResponses(id, responses);
+}
+
+export type SearchWatchEvent =
+  | { event: "started"; searchId: string }
+  | { event: "candidate"; searchId: string; candidate: Candidate }
+  | {
+      event: "ended";
+      searchId: string;
+      reason: "completed" | "deadline";
+      candidateCount: number;
+    };
+
+export type SearchWatchOptions = {
+  pollIntervalMs?: number;
+  watchTimeoutSeconds?: number;
+};
+
+export function resolveSearchWatchOptions(options: SearchWatchOptions = {}): {
+  pollIntervalMs: number;
+  watchTimeoutSeconds: number;
+} {
+  const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+  const watchTimeoutSeconds = options.watchTimeoutSeconds ?? DEFAULT_WATCH_TIMEOUT_SECONDS;
+  if (!Number.isSafeInteger(pollIntervalMs) || pollIntervalMs < 100 || pollIntervalMs > 60_000) {
+    throw inputError("pollIntervalMs must be an integer from 100 to 60000.");
+  }
+  if (
+    !Number.isSafeInteger(watchTimeoutSeconds) ||
+    watchTimeoutSeconds < 1 ||
+    watchTimeoutSeconds > 3600
+  ) {
+    throw inputError("watchTimeoutSeconds must be an integer from 1 to 3600.");
+  }
+
+  return { pollIntervalMs, watchTimeoutSeconds };
+}
+
+function waitForPoll(intervalMs: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const abort = () => {
+      clearTimeout(timer);
+      reject(signal.reason);
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", abort);
+      resolve();
+    }, intervalMs);
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) abort();
+  });
+}
+
+function collectionCompleted(search: JsonRecord): boolean {
+  if (typeof search.state !== "string" || search.state.trim().length === 0) {
+    throw new CliError("REMOTE", "slskd returned an invalid Search state.", REMOTE_EXIT);
+  }
+  // Soulseek.NET SearchStates is a flags enum, serialized by slskd as names.
+  return search.state.split(",").some((state) => state.trim().toLowerCase() === "completed");
+}
+
+/** Observe only slskd-owned Search state; replay and deduplication are scoped to this invocation. */
+export async function* searchWatch(
+  ctx: Context,
+  searchId: string,
+  options: SearchWatchOptions = {},
+): AsyncGenerator<SearchWatchEvent> {
+  searchId = canonicalSearchId(searchId);
+  const { pollIntervalMs, watchTimeoutSeconds } = resolveSearchWatchOptions(options);
+
+  const controller = new AbortController();
+  const deadline = new Error("Search observation deadline reached.");
+  const abort = () => controller.abort(ctx.signal?.reason);
+  ctx.signal?.addEventListener("abort", abort, { once: true });
+  if (ctx.signal?.aborted) abort();
+  const timer = setTimeout(() => controller.abort(deadline), watchTimeoutSeconds * 1000);
+  const watchCtx = { ...ctx, signal: controller.signal };
+  const emitted = new Set<string>();
+  try {
+    let search = await getSearch(watchCtx, searchId);
+    // Validate state before advertising successful attachment.
+    collectionCompleted(search);
+    controller.signal.throwIfAborted();
+    yield { event: "started", searchId };
+    while (true) {
+      controller.signal.throwIfAborted();
+      const completed = collectionCompleted(search);
+      let responses: unknown;
+      try {
+        responses = await request(
+          watchCtx,
+          "GET",
+          `searches/${encodeURIComponent(searchId)}/responses`,
+        );
+      } catch (error) {
+        if (isNotFound(error)) throw missingSearchError();
+        throw error;
+      }
+      for (const candidate of candidatesFromResponses(searchId, responses)) {
+        controller.signal.throwIfAborted();
+        if (emitted.has(candidate.candidateId)) continue;
+        emitted.add(candidate.candidateId);
+        yield { event: "candidate", searchId, candidate };
+      }
+      controller.signal.throwIfAborted();
+      if (completed) {
+        yield { event: "ended", searchId, reason: "completed", candidateCount: emitted.size };
+        return;
+      }
+      await waitForPoll(pollIntervalMs, controller.signal);
+      search = await getSearch(watchCtx, searchId);
+    }
+  } catch (error) {
+    if (error !== deadline) throw error;
+    yield { event: "ended", searchId, reason: "deadline", candidateCount: emitted.size };
+  } finally {
+    clearTimeout(timer);
+    ctx.signal?.removeEventListener("abort", abort);
+  }
 }
 
 /** Resolve a scoped candidate ID by re-reading slskd, keeping IDs stateless and deterministic. */

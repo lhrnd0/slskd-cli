@@ -1,12 +1,29 @@
 #!/usr/bin/env node
 import { CliError, compatible, resolveContext, requireYes } from "./core.js";
-import { searchCreate, searchCandidates, searchDelete, searchList } from "./search.js";
+import {
+  searchCreate,
+  searchCandidates,
+  searchDelete,
+  searchList,
+  resolveSearchWatchOptions,
+} from "./search.js";
 import { transferEnqueue } from "./enqueue.js";
 import { transferCancel, transferClear, transferDelete, transferInspect } from "./transfer.js";
+import { runSearchWatch } from "./watch-cli.js";
 
 type Flags = Record<string, string | boolean>;
-const VALUE_FLAGS = new Set(["base-url", "api-key", "timeout-ms", "query", "lifetime-seconds"]);
-const ALL_FLAGS = new Set([...VALUE_FLAGS, "help", "yes"]);
+const VALUE_FLAGS = new Set([
+  "base-url",
+  "api-key",
+  "timeout-ms",
+  "query",
+  "lifetime-seconds",
+  "poll-interval-ms",
+  "watch-timeout-seconds",
+]);
+const ALL_FLAGS = new Set([...VALUE_FLAGS, "help", "yes", "watch"]);
+
+class StreamedResult {}
 
 class HelpResult {
   constructor(readonly text: string) {}
@@ -57,9 +74,18 @@ Create a literal slskd search. Lifetime must be between 5 and 300 seconds and de
   ],
   [
     "search candidates",
-    `Usage: slskd search candidates <searchId> [connection options]
+    `Usage: slskd search candidates <searchId> [--watch] [connection options]
 
-List normalized candidates using the slskd UUID from search create or search list.`,
+List normalized candidates using the slskd UUID from search create or search list.
+With --watch, stream started, candidate, and ended events as newline-delimited JSON.
+Watch options:
+  --poll-interval-ms <ms>          Integer 100..60000; default 1000
+  --watch-timeout-seconds <sec>    Integer 1..3600; default 300
+A completed Search is drained before ended/completed. The watch deadline emits
+ended/deadline with exit 0, which does not imply collection finished.
+Candidate IDs are emitted once per invocation; a fresh watch replays existing Candidates.
+Request timeouts retain typed errors. SIGINT/SIGTERM stop observation with exit 130/143.
+Watching is read-only and leaves the Search available in slskd.`,
   ],
   [
     "search delete",
@@ -131,7 +157,7 @@ function parse(argv: string[]): { words: string[]; flags: Flags } {
     const name = arg.slice(2);
     if (!ALL_FLAGS.has(name) || name in flags)
       throw new CliError("INVALID_INPUT", "Unknown or repeated command flag.", 2);
-    if (name === "help" || name === "yes") {
+    if (name === "help" || name === "yes" || name === "watch") {
       flags[name] = true;
       continue;
     }
@@ -155,13 +181,20 @@ async function run(argv: string[]): Promise<unknown> {
     return new HelpResult(`${HELP.get("")}\n`);
   const help = helpFor(words, flags);
   if (help) return help;
+  const command = words.slice(0, 2).join(" ");
+  const watchOptions = ["poll-interval-ms", "watch-timeout-seconds"];
+  if (
+    (flags.watch !== undefined || watchOptions.some((key) => key in flags)) &&
+    (command !== "search candidates" || flags.watch !== true)
+  ) {
+    throw new CliError("INVALID_INPUT", "Watch options require search candidates --watch.", 2);
+  }
   if (
     (words.length === 1 && words[0] === "search") ||
     (words.length === 1 && words[0] === "transfer")
   ) {
     return new HelpResult(`${HELP.get(words[0])}\n`);
   }
-  const command = words.slice(0, 2).join(" ");
   const isMutation =
     command === "search delete" ||
     command === "transfer enqueue" ||
@@ -193,6 +226,19 @@ async function run(argv: string[]): Promise<unknown> {
     throw new CliError("INVALID_INPUT", "Unknown command.", 2);
   }
   const ctx = resolveContext(flags);
+  if (command === "search candidates" && flags.watch === true) {
+    requireWords(words, 3);
+    const watchOptions = resolveSearchWatchOptions({
+      ...(flags["poll-interval-ms"] === undefined
+        ? {}
+        : { pollIntervalMs: Number(flags["poll-interval-ms"]) }),
+      ...(flags["watch-timeout-seconds"] === undefined
+        ? {}
+        : { watchTimeoutSeconds: Number(flags["watch-timeout-seconds"]) }),
+    });
+    await runSearchWatch(ctx, words[2]!, watchOptions);
+    return new StreamedResult();
+  }
   const verified = await compatible(ctx);
   if (words[0] === "check") {
     requireWords(words, 1);
@@ -232,9 +278,11 @@ async function run(argv: string[]): Promise<unknown> {
 
 try {
   const value = await run(process.argv.slice(2));
-  process.stdout.write(
-    value instanceof HelpResult ? value.text : `${JSON.stringify({ ok: true, result: value })}\n`,
-  );
+  if (!(value instanceof StreamedResult)) {
+    process.stdout.write(
+      value instanceof HelpResult ? value.text : `${JSON.stringify({ ok: true, result: value })}\n`,
+    );
+  }
 } catch (error) {
   const failure =
     error instanceof CliError ? error : new CliError("REMOTE", "Unexpected CLI failure.", 7);

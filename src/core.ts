@@ -3,7 +3,12 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { parse as parseToml } from "smol-toml";
 
-export type Context = { baseUrl: string; apiKey: string; timeoutMs: number };
+export type Context = {
+  baseUrl: string;
+  apiKey: string;
+  timeoutMs: number;
+  signal?: AbortSignal;
+};
 
 const EXIT = {
   INVALID_INPUT: 2,
@@ -150,6 +155,14 @@ export async function request(
     throw new CliError("INVALID_INPUT", "Invalid API request path.", EXIT.INVALID_INPUT);
   }
   const controller = new AbortController();
+  let externallyAborted = false;
+  const abort = () => {
+    if (controller.signal.aborted) return;
+    externallyAborted = true;
+    controller.abort(ctx.signal?.reason);
+  };
+  ctx.signal?.addEventListener("abort", abort, { once: true });
+  if (ctx.signal?.aborted) abort();
   const timer = setTimeout(() => controller.abort(), ctx.timeoutMs);
   try {
     let response: Response;
@@ -165,6 +178,7 @@ export async function request(
         signal: controller.signal,
       });
     } catch (error) {
+      if (externallyAborted) throw controller.signal.reason;
       if (controller.signal.aborted) {
         if (mutation)
           throw new CliError(
@@ -210,6 +224,7 @@ export async function request(
       throw new CliError("REMOTE", "slskd returned invalid JSON.", EXIT.REMOTE);
     }
   } catch (error) {
+    if (externallyAborted) throw controller.signal.reason;
     if (error instanceof CliError) throw error;
     if (controller.signal.aborted) {
       if (mutation)
@@ -229,6 +244,7 @@ export async function request(
     throw new CliError("REMOTE", "Could not read the slskd response.", EXIT.REMOTE);
   } finally {
     clearTimeout(timer);
+    ctx.signal?.removeEventListener("abort", abort);
   }
 }
 
