@@ -72,6 +72,6 @@
 # - github.token    → use GITHUB_TOKEN env var instead
 
 export:
-    auto: true
+    auto: false
 sync:
     remote: "git+https://github.com/lhrnd0/slskd-cli.git"

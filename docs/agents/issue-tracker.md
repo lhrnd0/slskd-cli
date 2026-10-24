@@ -1,6 +1,6 @@
 # Issue Tracker
 
-Issues are tracked locally with [Beads](https://github.com/gastownhall/beads) using the `bd` CLI. The source of truth is the repository's local Dolt database under `.beads/dolt/`; `.beads/issues.jsonl` is only a passive export.
+Issues are tracked locally with [Beads](https://github.com/gastownhall/beads) using the `bd` CLI. The source of truth is the repository's local Dolt database under `.beads/dolt/`.
 
 ## Working with issues
 
