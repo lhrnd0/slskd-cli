@@ -50,7 +50,7 @@ node dist/cli.js transfer enqueue --help
 node dist/cli.js help search create
 ```
 
-Running the CLI, `search`, or `transfer` without further arguments also displays the relevant help. Help is plain text and does not read the Connection profile or contact slskd. Operational commands continue to emit exactly one JSON object.
+Running the CLI, `search`, `folder`, or `transfer` without further arguments also displays the relevant help. Help is plain text and does not read the Connection profile or contact slskd. Operational commands continue to emit exactly one JSON object.
 
 ## Connection profile
 
@@ -108,6 +108,27 @@ slskd transfer show '<username>' '<transferId>'
 
 `transfer show` reports slskd state, normalized status (`queued`, `active`, `complete`, `failed`, `cancelled`, or `unknown`), terminal flag, progress, failure detail, and `destination`. **Known limitation:** slskd 0.26.1 does not expose the resolved path for an individual Transfer, so `destination` is `null`. Its configured download root is not necessarily the final file path. A completed slskd Transfer is reported as complete; the CLI does not verify local file contents. Observation works from any new process with the same Connection profile.
 
+## Enqueue a release folder
+
+A Search can return one track while the peer shares a whole release. Discover the selected Candidate's immediate folder, then inspect the returned files before choosing a selection:
+
+```sh
+slskd folder discover '<searchId>' '<candidateId>' --yes
+slskd folder show '<folderRef>' --yes
+slskd transfer enqueue-folder '<folderRef>' '<fileId1>' '<fileId2>' --yes
+# Alternatively, enqueue every eligible file in the current folder:
+slskd transfer enqueue-folder '<folderRef>' --all --yes
+slskd transfer show '<username>' '<transferId>'
+```
+
+Use the `folderRef` and `fileId` values returned by discovery. These references work across CLI invocations without local Workflow state. Each discovery or refresh requests the directory from that peer and requires `--yes`; it never starts Transfers. The original Search does not need to contain every file in the directory. This uses slskd’s [peer-directory endpoint](https://github.com/slskd/slskd/blob/0.26.1/src/slskd/Users/API/Controllers/UsersController.cs), which waits for the peer’s directory response.
+
+Enqueue refreshes the listing before selecting files. Explicit identifiers become invalid if the file's remote path or byte size changes; discover or refresh again and inspect the new selection. `--all` selects the current eligible files, including artwork and other non-audio extras. It excludes nested folders and reports ineligible files under `skipped`. Use explicit file identifiers when you want only particular tracks. Do not combine explicit identifiers with `--all`.
+
+The result contains a `files` array with an `outcome` of `enqueued`, `existing`, `failed`, or `uncertain`, known Transfer details, and aggregate `counts`. Matching existing Transfers are returned without another enqueue. slskd controls the destination. Partial failures return `ok:false` with the per-file `result` preserved and a nonzero exit status; successful Transfers remain queued. An uncertain mutation is never automatically retried: inspect slskd using the returned Transfer identifiers and reconcile its downloads before retrying.
+
+The directory request uses the configured per-request timeout. Unavailable peers, missing directories, and incomplete responses are errors, rather than successful empty releases.
+
 ## Watch search candidates
 
 `search create` starts a Search and returns its canonical `searchId` immediately. To observe Candidates as slskd receives them, pass that ID to `search candidates --watch`:
@@ -154,18 +175,18 @@ Every mutation needs its own literal `--yes`. `cancel` leaves completed or alrea
 
 ## Exit codes
 
-| Exit | Meaning                                                             | Error codes                                                                             |
-| ---: | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-|    0 | Success                                                             | —                                                                                       |
-|    2 | Invalid input or acknowledgement                                    | `INVALID_INPUT`, `INVALID_CONFIG`, `INVALID_CANDIDATE`, `ACKNOWLEDGEMENT_REQUIRED`      |
-|    3 | Missing Connection values                                           | `MISSING_CONFIGURATION`                                                                 |
-|    4 | Authentication or key permissions                                   | `AUTHENTICATION`                                                                        |
-|    5 | Unsupported or unreadable slskd version                             | `INCOMPATIBLE`                                                                          |
-|    6 | Connection failure                                                  | `CONNECTION`                                                                            |
-|    7 | Remote error, missing/expired Search or Candidate, missing Transfer | `REMOTE`, `MISSING_SEARCH`, `EXPIRED_SEARCH`, `MISSING_CANDIDATE`, `TRANSFER_NOT_FOUND` |
-|    8 | Read request timeout                                                | `TIMEOUT`                                                                               |
-|    9 | Unknown mutation outcome                                            | `AMBIGUOUS_MUTATION`                                                                    |
-|  130 | SIGINT during watch observation                                     | —                                                                                       |
-|  143 | SIGTERM during watch observation                                    | —                                                                                       |
+| Exit | Meaning                                                             | Error codes                                                                                                                      |
+| ---: | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+|    0 | Success                                                             | —                                                                                                                                |
+|    2 | Invalid input or acknowledgement                                    | `INVALID_INPUT`, `INVALID_CONFIG`, `INVALID_CANDIDATE`, `ACKNOWLEDGEMENT_REQUIRED`                                               |
+|    3 | Missing Connection values                                           | `MISSING_CONFIGURATION`                                                                                                          |
+|    4 | Authentication or key permissions                                   | `AUTHENTICATION`                                                                                                                 |
+|    5 | Unsupported or unreadable slskd version                             | `INCOMPATIBLE`                                                                                                                   |
+|    6 | Connection failure                                                  | `CONNECTION`                                                                                                                     |
+|    7 | Remote error, missing/expired Search or Candidate, missing Transfer | `REMOTE`, `MISSING_SEARCH`, `EXPIRED_SEARCH`, `MISSING_CANDIDATE`, `TRANSFER_NOT_FOUND`, `UNAVAILABLE_FOLDER`, `PARTIAL_ENQUEUE` |
+|    8 | Read request timeout                                                | `TIMEOUT`                                                                                                                        |
+|    9 | Unknown mutation outcome                                            | `AMBIGUOUS_MUTATION`                                                                                                             |
+|  130 | SIGINT during watch observation                                     | —                                                                                                                                |
+|  143 | SIGTERM during watch observation                                    | —                                                                                                                                |
 
 An unknown mutation outcome uses exit 9 and `AMBIGUOUS_MUTATION`, including a timeout after sending a mutation. The CLI does not retry state-changing requests automatically.

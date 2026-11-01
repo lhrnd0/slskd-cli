@@ -7,6 +7,8 @@ import {
   searchList,
   resolveSearchWatchOptions,
 } from "./search.js";
+import { folderDiscover, folderShow } from "./folder.js";
+import { folderEnqueue } from "./folder-enqueue.js";
 import { transferEnqueue } from "./enqueue.js";
 import { transferCancel, transferClear, transferDelete, transferInspect } from "./transfer.js";
 import { runSearchWatch } from "./watch-cli.js";
@@ -21,7 +23,7 @@ const VALUE_FLAGS = new Set([
   "poll-interval-ms",
   "watch-timeout-seconds",
 ]);
-const ALL_FLAGS = new Set([...VALUE_FLAGS, "help", "yes", "watch"]);
+const ALL_FLAGS = new Set([...VALUE_FLAGS, "help", "yes", "watch", "all"]);
 
 class StreamedResult {}
 
@@ -40,6 +42,9 @@ Commands:
   search create                 Create a search
   search candidates             List candidates for a search
   search delete                 Delete a search
+  folder discover               Discover a candidate’s complete release folder
+  folder show                   Refresh a discovered folder
+  transfer enqueue-folder       Enqueue selected or all folder files
   transfer enqueue              Enqueue a candidate for download
   transfer show                 Show a download transfer
   transfer cancel               Cancel a download transfer
@@ -98,11 +103,45 @@ Delete a search and its stored responses from slskd.`,
     `Usage: slskd transfer <command>
 
 Commands:
+  enqueue-folder <folderRef> [fileId ...] [--all] --yes
   enqueue <searchId> <candidateId> --yes
   show <username> <transferId>
   cancel <username> <transferId> --yes
   clear --yes
   delete <username> <transferId> --yes`,
+  ],
+  [
+    "folder",
+    `Usage: slskd folder <command>
+
+Commands:
+  discover <searchId> <candidateId> --yes
+  show <folderRef> --yes`,
+  ],
+  [
+    "folder discover",
+    `Usage: slskd folder discover <searchId> <candidateId> --yes [connection options]
+
+Request the selected peer's complete immediate folder, including files absent from the Search.
+Returns folderRef and fileIds for inspection and enqueue. Never starts Transfers.
+The peer directory request requires --yes and uses the configured request timeout.`,
+  ],
+  [
+    "folder show",
+    `Usage: slskd folder show <folderRef> --yes [connection options]
+
+Refresh the peer directory listing using a previously returned folderRef.
+No local Workflow database is used. Never starts Transfers.`,
+  ],
+  [
+    "transfer enqueue-folder",
+    `Usage: slskd transfer enqueue-folder <folderRef> <fileId ...> --yes [connection options]
+       slskd transfer enqueue-folder <folderRef> --all --yes [connection options]
+
+Revalidate the current folder and enqueue explicit files or all eligible immediate-folder files.
+--all includes non-audio extras, excludes nested directories, and reports skipped files.
+Returns per-file outcomes and Transfer identifiers. Partial failures retain successful outcomes
+with a nonzero exit status. Query slskd before retrying an uncertain mutation.`,
   ],
   [
     "transfer enqueue",
@@ -157,7 +196,7 @@ function parse(argv: string[]): { words: string[]; flags: Flags } {
     const name = arg.slice(2);
     if (!ALL_FLAGS.has(name) || name in flags)
       throw new CliError("INVALID_INPUT", "Unknown or repeated command flag.", 2);
-    if (name === "help" || name === "yes" || name === "watch") {
+    if (name === "help" || name === "yes" || name === "watch" || name === "all") {
       flags[name] = true;
       continue;
     }
@@ -191,11 +230,17 @@ async function run(argv: string[]): Promise<unknown> {
   }
   if (
     (words.length === 1 && words[0] === "search") ||
-    (words.length === 1 && words[0] === "transfer")
+    (words.length === 1 && words[0] === "transfer") ||
+    (words.length === 1 && words[0] === "folder")
   ) {
     return new HelpResult(`${HELP.get(words[0])}\n`);
   }
+  if (flags.all !== undefined && command !== "transfer enqueue-folder")
+    throw new CliError("INVALID_INPUT", "--all requires transfer enqueue-folder.", 2);
   const isMutation =
+    command === "folder discover" ||
+    command === "folder show" ||
+    command === "transfer enqueue-folder" ||
     command === "search delete" ||
     command === "transfer enqueue" ||
     command === "transfer cancel" ||
@@ -215,6 +260,9 @@ async function run(argv: string[]): Promise<unknown> {
       "search create",
       "search candidates",
       "search delete",
+      "folder discover",
+      "folder show",
+      "transfer enqueue-folder",
       "transfer enqueue",
       "transfer show",
       "transfer cancel",
@@ -261,6 +309,50 @@ async function run(argv: string[]): Promise<unknown> {
   if (command === "search delete") {
     requireWords(words, 3);
     return searchDelete(ctx, words[2]!);
+  }
+  if (command === "folder discover") {
+    requireWords(words, 4);
+    return folderDiscover(ctx, words[2]!, words[3]!, flags.yes);
+  }
+  if (command === "folder show") {
+    requireWords(words, 3);
+    return folderShow(ctx, words[2]!, flags.yes);
+  }
+  if (command === "transfer enqueue-folder") {
+    if (words.length < 3 || words.some((word) => !word))
+      throw new CliError("INVALID_INPUT", "A folderRef is required.", 2);
+    const { exitCode, ...result } = await folderEnqueue(
+      ctx,
+      words[2]!,
+      words.slice(3),
+      flags.all === true,
+      flags.yes,
+    );
+    if (exitCode !== 0) {
+      process.stdout.write(
+        `${JSON.stringify({
+          ok: false,
+          result,
+          error: {
+            code:
+              exitCode === 9
+                ? "AMBIGUOUS_MUTATION"
+                : exitCode === 4
+                  ? "AUTHENTICATION"
+                  : exitCode === 2
+                    ? "INVALID_INPUT"
+                    : "PARTIAL_ENQUEUE",
+            message:
+              exitCode === 2
+                ? "The folder has no eligible files to enqueue; inspect skipped files for details."
+                : "Some selected files could not be confirmed enqueued; inspect per-file outcomes before retrying.",
+          },
+        })}\n`,
+      );
+      process.exitCode = exitCode;
+      return new StreamedResult();
+    }
+    return result;
   }
   if (command === "transfer enqueue") {
     requireWords(words, 4);

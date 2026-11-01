@@ -1,0 +1,301 @@
+import { deterministicBatchId } from "./batch.js";
+import { CliError, type Context, request, requireYes } from "./core.js";
+import { folderShow, type FolderFile } from "./folder.js";
+import { transferInspect, transferList, type TransferResult } from "./transfer.js";
+
+type Outcome = "enqueued" | "existing" | "failed" | "uncertain";
+type FileOutcome = {
+  fileId: string;
+  path: string;
+  size: number | null;
+  outcome: Outcome;
+  transfer: TransferResult | null;
+  error?: { code: string; message: string };
+};
+export type FolderEnqueueResult = {
+  exitCode: 0 | 2 | 4 | 7 | 9;
+  folderRef: string;
+  username: string;
+  directory: string;
+  files: FileOutcome[];
+  skipped: FolderFile[];
+  counts: {
+    selected: number;
+    enqueued: number;
+    existing: number;
+    failed: number;
+    uncertain: number;
+    skipped: number;
+  };
+};
+
+function object(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+function batchId(username: string, files: FolderFile[]): string {
+  const sorted = files
+    .map((file) => [file.path, file.size])
+    .sort(([a], [b]) => (String(a) < String(b) ? -1 : String(a) > String(b) ? 1 : 0));
+  return deterministicBatchId([username, sorted]);
+}
+function isHttp(error: unknown, status: number): boolean {
+  return (
+    error instanceof CliError && error.code === "REMOTE" && error.message.includes(`HTTP ${status}`)
+  );
+}
+function matches(transfer: TransferResult, username: string, file: FolderFile): boolean {
+  return (
+    transfer.username === username &&
+    transfer.filename === file.path &&
+    transfer.progress.size === file.size
+  );
+}
+function counts(files: FileOutcome[], skipped: FolderFile[]) {
+  return {
+    selected: files.length,
+    enqueued: files.filter((file) => file.outcome === "enqueued").length,
+    existing: files.filter((file) => file.outcome === "existing").length,
+    failed: files.filter((file) => file.outcome === "failed").length,
+    uncertain: files.filter((file) => file.outcome === "uncertain").length,
+    skipped: skipped.length,
+  };
+}
+
+export async function folderEnqueue(
+  ctx: Context,
+  folderRef: string,
+  fileIds: string[],
+  all: boolean,
+  yes: unknown,
+): Promise<FolderEnqueueResult> {
+  if (!Array.isArray(fileIds) || fileIds.some((id) => typeof id !== "string" || !id))
+    throw new CliError("INVALID_INPUT", "File identifiers must be non-empty strings.", 2);
+  if (all && fileIds.length)
+    throw new CliError("INVALID_INPUT", "Use --all or file identifiers, not both.", 2);
+  if (!all && !fileIds.length)
+    throw new CliError("INVALID_INPUT", "Select file identifiers or use --all.", 2);
+  requireYes(yes);
+  const listing = await folderShow(ctx, folderRef, yes);
+  const uniqueIds = [...new Set(fileIds)];
+  let selected: FolderFile[];
+  let skipped: FolderFile[] = [];
+  if (all) {
+    selected = listing.files.filter((file) => file.eligible);
+    skipped = listing.files.filter((file) => !file.eligible);
+  } else {
+    const indexed = new Map(listing.files.map((file) => [file.fileId, file]));
+    selected = uniqueIds.map((id) => {
+      const file = indexed.get(id);
+      if (!file)
+        throw new CliError(
+          "INVALID_INPUT",
+          "A selected file is not present in the current folder listing.",
+          2,
+        );
+      if (
+        !file.eligible ||
+        file.isLocked === true ||
+        !file.path ||
+        !Number.isSafeInteger(file.size) ||
+        file.size === null ||
+        file.size < 0
+      )
+        throw new CliError(
+          "INVALID_INPUT",
+          "A selected file is no longer eligible for enqueue.",
+          2,
+        );
+      return file;
+    });
+  }
+
+  const result: FileOutcome[] = selected.map((file) => ({
+    fileId: file.fileId,
+    path: file.path,
+    size: file.size,
+    outcome: "failed",
+    transfer: null,
+  }));
+  const finish = (exitCode: 0 | 2 | 4 | 7 | 9): FolderEnqueueResult => ({
+    exitCode,
+    folderRef: listing.folderRef,
+    username: listing.username,
+    directory: listing.directory,
+    files: result,
+    skipped,
+    counts: counts(result, skipped),
+  });
+  if (!selected.length) return finish(2);
+  const existing = await transferList(ctx);
+  const pending: FolderFile[] = [];
+  selected.forEach((file, index) => {
+    const match = existing.find((transfer) => matches(transfer, listing.username, file));
+    if (match) {
+      result[index]!.outcome = "existing";
+      result[index]!.transfer = match;
+    } else pending.push(file);
+  });
+  if (!pending.length) return finish(0);
+
+  const id = batchId(listing.username, pending);
+  let response: unknown;
+  try {
+    response = await request(
+      ctx,
+      "POST",
+      "/transfers/downloads/batches",
+      {
+        id,
+        username: listing.username,
+        files: pending.map((file) => ({ filename: file.path, size: file.size })),
+      },
+      true,
+    );
+  } catch (error) {
+    if (isHttp(error, 409)) {
+      try {
+        response = await request(ctx, "GET", `/transfers/downloads/batches/${id}`);
+      } catch {
+        for (const file of pending) {
+          const item = result.find((entry) => entry.fileId === file.fileId)!;
+          item.outcome = "uncertain";
+          item.error = {
+            code: "AMBIGUOUS_MUTATION",
+            message: "Batch conflict could not be reconciled. Query slskd before retrying.",
+          };
+        }
+        return finish(9);
+      }
+    } else if (
+      error instanceof CliError &&
+      (error.code === "AUTHENTICATION" ||
+        (error.code === "REMOTE" && [400, 404].some((status) => isHttp(error, status))))
+    ) {
+      for (const file of pending) {
+        const item = result.find((entry) => entry.fileId === file.fileId)!;
+        item.outcome = "failed";
+        item.error = { code: error.code, message: "slskd rejected the enqueue request." };
+      }
+      return finish(error.exitCode === 4 ? 4 : 7);
+    } else {
+      let current: TransferResult[] = [];
+      try {
+        current = await transferList(ctx);
+      } catch {
+        /* Preserve the ambiguous outcome. */
+      }
+      for (const file of pending) {
+        const item = result.find((entry) => entry.fileId === file.fileId)!;
+        const transfer = current.find((candidate) => matches(candidate, listing.username, file));
+        if (transfer) {
+          item.outcome = "enqueued";
+          item.transfer = transfer;
+        } else {
+          item.outcome = "uncertain";
+          item.error = {
+            code: "AMBIGUOUS_MUTATION",
+            message: "Enqueue outcome is unknown. Query slskd before retrying.",
+          };
+        }
+      }
+      return finish(result.some((item) => item.outcome === "uncertain") ? 9 : 0);
+    }
+  }
+
+  const wrapper = object(response);
+  const batch = object(wrapper?.batch);
+  const transfers = Array.isArray(batch?.transfers)
+    ? batch.transfers
+    : Array.isArray(wrapper?.transfers)
+      ? wrapper.transfers
+      : [];
+  const failures = Array.isArray(wrapper?.failures) ? wrapper.failures : [];
+  let reconciled: TransferResult[] | undefined;
+  const used = new Set<unknown>();
+  for (const file of pending) {
+    const item = result.find((entry) => entry.fileId === file.fileId)!;
+    const raw = transfers.find((candidate) => {
+      const value = object(candidate);
+      return (
+        value?.username === listing.username &&
+        value.filename === file.path &&
+        value.size === file.size &&
+        typeof value.id === "string" &&
+        !used.has(value.id)
+      );
+    });
+    const failure = failures.map(object).find((candidate) => candidate?.filename === file.path);
+    if (failure) {
+      try {
+        reconciled ??= await transferList(ctx);
+      } catch {
+        /* Keep the explicit batch failure. */
+      }
+      const found = reconciled?.find((candidate) => matches(candidate, listing.username, file));
+      if (found) {
+        item.outcome = "existing";
+        item.transfer = found;
+      } else {
+        item.outcome = "failed";
+        item.error = {
+          code: "REMOTE",
+          message: "slskd reported that this file could not be enqueued.",
+        };
+      }
+    } else if (raw) {
+      const transferId = object(raw)?.id as string;
+      used.add(transferId);
+      try {
+        const inspected = await transferInspect(ctx, listing.username, transferId);
+        if (!matches(inspected, listing.username, file))
+          throw new Error("Transfer identity mismatch");
+        item.transfer = inspected;
+        item.outcome = "enqueued";
+      } catch {
+        item.transfer = {
+          id: transferId,
+          username: listing.username,
+          filename: file.path,
+          state: "Unknown",
+          status: "unknown",
+          terminal: false,
+          progress: { bytesTransferred: null, size: file.size, percent: null },
+          destination: null,
+          exception: null,
+        };
+        item.outcome = "uncertain";
+        item.error = {
+          code: "AMBIGUOUS_MUTATION",
+          message:
+            "The Transfer was returned but its current state could not be verified. Query slskd before retrying.",
+        };
+      }
+    } else {
+      try {
+        reconciled ??= await transferList(ctx);
+      } catch {
+        /* Unresolved entries remain uncertain. */
+      }
+      const found = reconciled?.find((candidate) => matches(candidate, listing.username, file));
+      if (found) {
+        item.transfer = found;
+        item.outcome = "enqueued";
+      } else {
+        item.outcome = "uncertain";
+        item.error = {
+          code: "AMBIGUOUS_MUTATION",
+          message: "No matching Transfer was returned. Query slskd before retrying.",
+        };
+      }
+    }
+  }
+  return finish(
+    result.some((item) => item.outcome === "uncertain")
+      ? 9
+      : result.some((item) => item.outcome === "failed")
+        ? 7
+        : 0,
+  );
+}
