@@ -163,8 +163,8 @@ async function discover(host) {
   assert.equal(candidates.code, 0, candidates.stderr);
   const output = await run(
     [
+      "search",
       "folder",
-      "discover",
       "11111111-1111-4111-8111-111111111111",
       candidates.json.result.candidates[0].candidateId,
       "--yes",
@@ -179,10 +179,7 @@ test("packaged CLI enqueues all 13 fresh immediate-folder files and repeat resol
   const host = await fixture();
   t.after(host.close);
   const folder = await discover(host);
-  const enqueued = await run(
-    ["transfer", "enqueue-folder", folder.folderRef, "--all", "--yes"],
-    host,
-  );
+  const enqueued = await run(["transfer", "enqueue", folder.folderRef, "--all", "--yes"], host);
   assert.equal(enqueued.code, 0, enqueued.stderr);
   assert.equal(enqueued.json.result.counts.enqueued, 13);
   assert.equal(enqueued.json.result.files.length, 13);
@@ -192,10 +189,7 @@ test("packaged CLI enqueues all 13 fresh immediate-folder files and repeat resol
   );
   assert.equal(payload.files.length, 13);
   assert.equal("searchId" in payload, false);
-  const repeated = await run(
-    ["transfer", "enqueue-folder", folder.folderRef, "--all", "--yes"],
-    host,
-  );
+  const repeated = await run(["transfer", "enqueue", folder.folderRef, "--all", "--yes"], host);
   assert.equal(repeated.code, 0);
   assert.equal(repeated.json.result.counts.existing, 13);
   assert.equal(
@@ -208,18 +202,12 @@ test("packaged CLI requires acknowledgement and rejects stale IDs and conflictin
   const host = await fixture();
   t.after(host.close);
   const folder = await discover(host);
-  const noAck = await run(
-    ["transfer", "enqueue-folder", folder.folderRef, folder.files[0].fileId],
-    host,
-  );
+  const noAck = await run(["transfer", "enqueue", folder.folderRef, folder.files[0].fileId], host);
   assert.equal(noAck.json.error.code, "ACKNOWLEDGEMENT_REQUIRED");
-  const stale = await run(
-    ["transfer", "enqueue-folder", folder.folderRef, "file_stale", "--yes"],
-    host,
-  );
+  const stale = await run(["transfer", "enqueue", folder.folderRef, "file_stale", "--yes"], host);
   assert.equal(stale.json.error.code, "INVALID_INPUT");
   const conflict = await run(
-    ["transfer", "enqueue-folder", folder.folderRef, folder.files[0].fileId, "--all", "--yes"],
+    ["transfer", "enqueue", folder.folderRef, folder.files[0].fileId, "--all", "--yes"],
     host,
   );
   assert.equal(conflict.json.error.code, "INVALID_INPUT");
@@ -246,10 +234,7 @@ test("explicit selections deduplicate, preserve existing Transfers, and have ord
     folder.files[2].fileId,
     folder.files[1].fileId,
   ];
-  const result = await run(
-    ["transfer", "enqueue-folder", folder.folderRef, ...selected, "--yes"],
-    first,
-  );
+  const result = await run(["transfer", "enqueue", folder.folderRef, ...selected, "--yes"], first);
   assert.equal(result.code, 0);
   assert.equal(result.json.result.counts.selected, 3);
   assert.equal(result.json.result.counts.existing, 1);
@@ -265,7 +250,7 @@ test("explicit selections deduplicate, preserve existing Transfers, and have ord
   const reordered = await run(
     [
       "transfer",
-      "enqueue-folder",
+      "enqueue",
       secondFolder.folderRef,
       secondFolder.files[1].fileId,
       secondFolder.files[2].fileId,
@@ -287,7 +272,7 @@ test("partial batch failures retain successful Transfer IDs and ambiguous POST i
   const partial = await run(
     [
       "transfer",
-      "enqueue-folder",
+      "enqueue",
       folder.folderRef,
       folder.files[0].fileId,
       folder.files[1].fileId,
@@ -308,13 +293,7 @@ test("partial batch failures retain successful Transfer IDs and ambiguous POST i
   t.after(uncertainHost.close);
   const uncertainFolder = await discover(uncertainHost);
   const uncertain = await run(
-    [
-      "transfer",
-      "enqueue-folder",
-      uncertainFolder.folderRef,
-      uncertainFolder.files[0].fileId,
-      "--yes",
-    ],
+    ["transfer", "enqueue", uncertainFolder.folderRef, uncertainFolder.files[0].fileId, "--yes"],
     uncertainHost,
   );
   assert.equal(uncertain.code, 9);
@@ -331,7 +310,7 @@ test("409 batch conflict reconciles by batch identity and authentication keeps e
   t.after(conflictHost.close);
   const folder = await discover(conflictHost);
   const conflict = await run(
-    ["transfer", "enqueue-folder", folder.folderRef, folder.files[0].fileId, "--yes"],
+    ["transfer", "enqueue", folder.folderRef, folder.files[0].fileId, "--yes"],
     conflictHost,
   );
   assert.equal(conflict.code, 0);
@@ -351,7 +330,7 @@ test("409 batch conflict reconciles by batch identity and authentication keeps e
   t.after(authHost.close);
   const authFolder = await discover(authHost);
   const auth = await run(
-    ["transfer", "enqueue-folder", authFolder.folderRef, authFolder.files[0].fileId, "--yes"],
+    ["transfer", "enqueue", authFolder.folderRef, authFolder.files[0].fileId, "--yes"],
     authHost,
   );
   assert.equal(auth.code, 4);
@@ -364,7 +343,7 @@ test("changed file sizes are rejected against a fresh listing and --all skips lo
   const previous = await discover(changedHost);
   changedHost.setChanged();
   const stale = await run(
-    ["transfer", "enqueue-folder", previous.folderRef, previous.files[0].fileId, "--yes"],
+    ["transfer", "enqueue", previous.folderRef, previous.files[0].fileId, "--yes"],
     changedHost,
   );
   assert.equal(stale.code, 2);
@@ -380,15 +359,12 @@ test("changed file sizes are rejected against a fresh listing and --all skips lo
   const folder = await discover(lockedHost);
   assert.equal(folder.files[12].eligible, true, "non-audio extras remain eligible");
   const explicitLocked = await run(
-    ["transfer", "enqueue-folder", folder.folderRef, folder.files[3].fileId, "--yes"],
+    ["transfer", "enqueue", folder.folderRef, folder.files[3].fileId, "--yes"],
     lockedHost,
   );
   assert.equal(explicitLocked.code, 2);
   assert.equal(explicitLocked.json.error.code, "INVALID_INPUT");
-  const all = await run(
-    ["transfer", "enqueue-folder", folder.folderRef, "--all", "--yes"],
-    lockedHost,
-  );
+  const all = await run(["transfer", "enqueue", folder.folderRef, "--all", "--yes"], lockedHost);
   assert.equal(all.code, 0);
   assert.equal(all.json.result.counts.enqueued, 12);
   assert.equal(all.json.result.counts.skipped, 1);
@@ -405,7 +381,7 @@ test("all mode reports skipped reasons for all-ineligible and empty current list
   t.after(ineligibleHost.close);
   const ineligibleFolder = await discover(ineligibleHost);
   const ineligible = await run(
-    ["transfer", "enqueue-folder", ineligibleFolder.folderRef, "--all", "--yes"],
+    ["transfer", "enqueue", ineligibleFolder.folderRef, "--all", "--yes"],
     ineligibleHost,
   );
   assert.equal(ineligible.code, 2);
@@ -422,7 +398,7 @@ test("all mode reports skipped reasons for all-ineligible and empty current list
   t.after(emptyHost.close);
   const emptyFolder = await discover(emptyHost);
   const empty = await run(
-    ["transfer", "enqueue-folder", emptyFolder.folderRef, "--all", "--yes"],
+    ["transfer", "enqueue", emptyFolder.folderRef, "--all", "--yes"],
     emptyHost,
   );
   assert.equal(empty.code, 2);
@@ -441,15 +417,12 @@ test("changed current membership rejects old explicit IDs and --all selects only
   const previous = await discover(host);
   host.setListingFiles(releaseFiles.slice(1));
   const stale = await run(
-    ["transfer", "enqueue-folder", previous.folderRef, previous.files[0].fileId, "--yes"],
+    ["transfer", "enqueue", previous.folderRef, previous.files[0].fileId, "--yes"],
     host,
   );
   assert.equal(stale.code, 2);
   assert.equal(stale.json.error.code, "INVALID_INPUT");
-  const current = await run(
-    ["transfer", "enqueue-folder", previous.folderRef, "--all", "--yes"],
-    host,
-  );
+  const current = await run(["transfer", "enqueue", previous.folderRef, "--all", "--yes"], host);
   assert.equal(current.code, 0);
   assert.equal(current.json.result.counts.selected, 12);
   assert.ok(current.json.result.files.every((file) => !file.path.endsWith(releaseFiles[0])));
@@ -462,7 +435,7 @@ test("HTTP 500 after partial acceptance reconciles known Transfers and marks the
   const result = await run(
     [
       "transfer",
-      "enqueue-folder",
+      "enqueue",
       folder.folderRef,
       folder.files[0].fileId,
       folder.files[1].fileId,
@@ -487,7 +460,7 @@ test("timed out partial mutation reconciles known Transfers without retrying", a
   const result = await run(
     [
       "transfer",
-      "enqueue-folder",
+      "enqueue",
       folder.folderRef,
       folder.files[0].fileId,
       folder.files[1].fileId,

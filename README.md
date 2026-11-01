@@ -50,7 +50,7 @@ node dist/cli.js transfer enqueue --help
 node dist/cli.js help search create
 ```
 
-Running the CLI, `search`, `folder`, or `transfer` without further arguments also displays the relevant help. Help is plain text and does not read the Connection profile or contact slskd. Operational commands continue to emit exactly one JSON object.
+Running the CLI, `search`, or `transfer` without further arguments also displays the relevant help. Help is plain text and does not read the Connection profile or contact slskd. Operational commands continue to emit exactly one JSON object.
 
 ## Connection profile
 
@@ -104,7 +104,7 @@ slskd transfer show '<username>' '<transferId>'
 
 `search create` passes the query literally to slskd. Lifetime is an integer from **5 to 300 seconds**, default **60**. For slskd 0.26.1, the CLI sends the API timeout in milliseconds because that release interprets the field in milliseconds despite describing it as seconds. The returned `searchId` is slskd's UUID, identical to the ID in `search list`. The lifetime controls response collection; completed Searches and their Candidates remain usable while slskd retains them. The CLI does not impose a separate age limit or store Search state. `search create` returns `{searchId,lifetimeSeconds}`. Previous signed CLI Search references are no longer accepted; use `search list` to obtain the canonical UUID. `search candidates` returns `{searchId,candidates:[...]}`. Each Candidate includes an opaque `candidateId`, username, remote `path`, basename `filename`, extension, byte `size`, queue length, free slot status, upload speed, available audio attributes, and `null` for unavailable metadata. Candidates are never ranked or selected by the CLI.
 
-`transfer enqueue` accepts only the `candidateId` from the supplied Search. It rereads live slskd results, checks slskd Search availability and Candidate association, and requires the literal `--yes`. It first checks slskd's downloads for the same username, remote path, and size; a safe retry returns that Transfer with `existing:true`. A new enqueue uses slskd's batch API and returns an inspectable Transfer. If the request's network outcome is unknown, it returns `AMBIGUOUS_MUTATION` and does not retry it. Inspect slskd Transfer state before issuing another enqueue.
+When given a Search identifier, `transfer enqueue` accepts only the `candidateId` from that Search. It rereads live slskd results, checks slskd Search availability and Candidate association, and requires the literal `--yes`. It first checks slskd's downloads for the same username, remote path, and size; a safe retry returns that Transfer with `existing:true`. A new enqueue uses slskd's batch API and returns an inspectable Transfer. If the request's network outcome is unknown, it returns `AMBIGUOUS_MUTATION` and does not retry it. Inspect slskd Transfer state before issuing another enqueue.
 
 `transfer show` reports slskd state, normalized status (`queued`, `active`, `complete`, `failed`, `cancelled`, or `unknown`), terminal flag, progress, failure detail, and `destination`. **Known limitation:** slskd 0.26.1 does not expose the resolved path for an individual Transfer, so `destination` is `null`. Its configured download root is not necessarily the final file path. A completed slskd Transfer is reported as complete; the CLI does not verify local file contents. Observation works from any new process with the same Connection profile.
 
@@ -113,11 +113,11 @@ slskd transfer show '<username>' '<transferId>'
 A Search can return one track while the peer shares a whole release. Discover the selected Candidate's immediate folder, then inspect the returned files before choosing a selection:
 
 ```sh
-slskd folder discover '<searchId>' '<candidateId>' --yes
-slskd folder show '<folderRef>' --yes
-slskd transfer enqueue-folder '<folderRef>' '<fileId1>' '<fileId2>' --yes
+slskd search folder '<searchId>' '<candidateId>' --yes
+slskd search folder '<folderRef>' --yes
+slskd transfer enqueue '<folderRef>' '<fileId1>' '<fileId2>' --yes
 # Alternatively, enqueue every eligible file in the current folder:
-slskd transfer enqueue-folder '<folderRef>' --all --yes
+slskd transfer enqueue '<folderRef>' --all --yes
 slskd transfer show '<username>' '<transferId>'
 ```
 

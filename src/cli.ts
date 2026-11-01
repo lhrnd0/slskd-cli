@@ -42,10 +42,8 @@ Commands:
   search create                 Create a search
   search candidates             List candidates for a search
   search delete                 Delete a search
-  folder discover               Discover a candidate’s complete release folder
-  folder show                   Refresh a discovered folder
-  transfer enqueue-folder       Enqueue selected or all folder files
-  transfer enqueue              Enqueue a candidate for download
+  search folder                 Discover or refresh a complete release folder
+  transfer enqueue              Enqueue a candidate or selected folder files
   transfer show                 Show a download transfer
   transfer cancel               Cancel a download transfer
   transfer clear                Clear completed downloads
@@ -65,6 +63,9 @@ Commands:
   list                           List existing searches
   create                         Create a search
   candidates <searchId>          List candidates for a search
+  folder <searchId> <candidateId> --yes
+                                Discover a candidate’s release folder
+  folder <folderRef> --yes       Refresh a discovered folder
   delete <searchId> --yes        Delete a search`,
   ],
   [
@@ -103,51 +104,35 @@ Delete a search and its stored responses from slskd.`,
     `Usage: slskd transfer <command>
 
 Commands:
-  enqueue-folder <folderRef> [fileId ...] [--all] --yes
   enqueue <searchId> <candidateId> --yes
+  enqueue <folderRef> <fileId ...> --yes
+  enqueue <folderRef> --all --yes
   show <username> <transferId>
   cancel <username> <transferId> --yes
   clear --yes
   delete <username> <transferId> --yes`,
   ],
   [
-    "folder",
-    `Usage: slskd folder <command>
-
-Commands:
-  discover <searchId> <candidateId> --yes
-  show <folderRef> --yes`,
-  ],
-  [
-    "folder discover",
-    `Usage: slskd folder discover <searchId> <candidateId> --yes [connection options]
+    "search folder",
+    `Usage: slskd search folder <searchId> <candidateId> --yes [connection options]
+       slskd search folder <folderRef> --yes [connection options]
 
 Request the selected peer's complete immediate folder, including files absent from the Search.
+Use a previously returned folderRef to refresh the listing.
 Returns folderRef and fileIds for inspection and enqueue. Never starts Transfers.
 The peer directory request requires --yes and uses the configured request timeout.`,
   ],
   [
-    "folder show",
-    `Usage: slskd folder show <folderRef> --yes [connection options]
-
-Refresh the peer directory listing using a previously returned folderRef.
-No local Workflow database is used. Never starts Transfers.`,
-  ],
-  [
-    "transfer enqueue-folder",
-    `Usage: slskd transfer enqueue-folder <folderRef> <fileId ...> --yes [connection options]
-       slskd transfer enqueue-folder <folderRef> --all --yes [connection options]
-
-Revalidate the current folder and enqueue explicit files or all eligible immediate-folder files.
---all includes non-audio extras, excludes nested directories, and reports skipped files.
-Returns per-file outcomes and Transfer identifiers. Partial failures retain successful outcomes
-with a nonzero exit status. Query slskd before retrying an uncertain mutation.`,
-  ],
-  [
     "transfer enqueue",
     `Usage: slskd transfer enqueue <searchId> <candidateId> --yes [connection options]
+       slskd transfer enqueue <folderRef> <fileId ...> --yes [connection options]
+       slskd transfer enqueue <folderRef> --all --yes [connection options]
 
-Enqueue a selected candidate. A safe retry returns the existing matching transfer.`,
+Enqueue a selected candidate or files from a folder returned by search folder.
+A safe retry returns existing matching Transfers. Folder selections are revalidated.
+--all includes non-audio extras, excludes nested directories, and reports skipped files.
+Use explicit fileIds or --all, not both. Partial failures retain successful outcomes
+with a nonzero exit status. Query slskd before retrying an uncertain mutation.`,
   ],
   [
     "transfer show",
@@ -230,17 +215,17 @@ async function run(argv: string[]): Promise<unknown> {
   }
   if (
     (words.length === 1 && words[0] === "search") ||
-    (words.length === 1 && words[0] === "transfer") ||
-    (words.length === 1 && words[0] === "folder")
+    (words.length === 1 && words[0] === "transfer")
   ) {
     return new HelpResult(`${HELP.get(words[0])}\n`);
   }
-  if (flags.all !== undefined && command !== "transfer enqueue-folder")
-    throw new CliError("INVALID_INPUT", "--all requires transfer enqueue-folder.", 2);
+  if (
+    flags.all !== undefined &&
+    (command !== "transfer enqueue" || !words[2]?.startsWith("folder_"))
+  )
+    throw new CliError("INVALID_INPUT", "--all requires transfer enqueue with a folderRef.", 2);
   const isMutation =
-    command === "folder discover" ||
-    command === "folder show" ||
-    command === "transfer enqueue-folder" ||
+    command === "search folder" ||
     command === "search delete" ||
     command === "transfer enqueue" ||
     command === "transfer cancel" ||
@@ -260,9 +245,7 @@ async function run(argv: string[]): Promise<unknown> {
       "search create",
       "search candidates",
       "search delete",
-      "folder discover",
-      "folder show",
-      "transfer enqueue-folder",
+      "search folder",
       "transfer enqueue",
       "transfer show",
       "transfer cancel",
@@ -310,17 +293,14 @@ async function run(argv: string[]): Promise<unknown> {
     requireWords(words, 3);
     return searchDelete(ctx, words[2]!);
   }
-  if (command === "folder discover") {
+  if (command === "search folder") {
+    if (words.length === 3) return folderShow(ctx, words[2]!, flags.yes);
     requireWords(words, 4);
     return folderDiscover(ctx, words[2]!, words[3]!, flags.yes);
   }
-  if (command === "folder show") {
-    requireWords(words, 3);
-    return folderShow(ctx, words[2]!, flags.yes);
-  }
-  if (command === "transfer enqueue-folder") {
-    if (words.length < 3 || words.some((word) => !word))
-      throw new CliError("INVALID_INPUT", "A folderRef is required.", 2);
+  if (command === "transfer enqueue" && words[2]?.startsWith("folder_")) {
+    if (words.some((word) => !word))
+      throw new CliError("INVALID_INPUT", "Invalid command arguments.", 2);
     const { exitCode, ...result } = await folderEnqueue(
       ctx,
       words[2]!,
