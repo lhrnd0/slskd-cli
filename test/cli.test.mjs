@@ -148,6 +148,7 @@ test("help covers the root, command groups, and every command without configurat
     ["search", "list"],
     ["search", "create"],
     ["search", "candidates"],
+    ["search", "folder"],
     ["search", "delete"],
     ["transfer"],
     ["transfer", "enqueue"],
@@ -175,6 +176,29 @@ test("help covers the root, command groups, and every command without configurat
   const unknown = await cli(["help", "unknown"]);
   assert.equal(unknown.code, 2);
   assert.equal(unknown.json.error.code, "INVALID_INPUT");
+});
+
+test("unified folder commands advertise discovery, refresh and both enqueue selections", async () => {
+  const search = await rawCli(["search", "folder", "--help"]);
+  assert.equal(search.code, 0);
+  assert.match(search.stdout, /search folder <searchId> <candidateId>/);
+  assert.match(search.stdout, /search folder <folderRef>/);
+  const enqueue = await rawCli(["transfer", "enqueue", "--help"]);
+  assert.equal(enqueue.code, 0);
+  assert.match(enqueue.stdout, /enqueue <searchId> <candidateId>/);
+  assert.match(enqueue.stdout, /enqueue <folderRef> <fileId \.\.\.>/);
+  assert.match(enqueue.stdout, /enqueue <folderRef> --all/);
+  for (const args of [
+    ["folder", "--help"],
+    ["folder", "discover", "--yes"],
+    ["transfer", "enqueue-folder", "--help"],
+    ["transfer", "enqueue", SEARCH_ID, "candidate", "--all", "--yes"],
+    ["search", "folder", "--all", "--yes"],
+  ]) {
+    const invalid = await cli(args);
+    assert.equal(invalid.code, 2, args.join(" "));
+    assert.equal(invalid.json.error.code, "INVALID_INPUT", args.join(" "));
+  }
 });
 
 test("packaged command completes and resumes a selected Workflow", async () => {

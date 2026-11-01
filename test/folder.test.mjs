@@ -98,13 +98,13 @@ async function fixture(
   };
 }
 
-test("folder discover expands a Search Candidate to immediate files and reusable reference", async () => {
+test("search folder expands a Search Candidate to immediate files and reusable reference", async () => {
   const f = await fixture();
   try {
     const candidates = await run(["search", "candidates", SEARCH_ID], f);
     assert.equal(candidates.code, 0, candidates.stdout);
     const cid = JSON.parse(candidates.stdout).result.candidates[0].candidateId;
-    const result = await run(["folder", "discover", SEARCH_ID, cid, "--yes"], f);
+    const result = await run(["search", "folder", SEARCH_ID, cid, "--yes"], f);
     assert.equal(result.code, 0, result.stdout);
     const folder = JSON.parse(result.stdout).result;
     assert.equal(folder.username, "alice");
@@ -122,7 +122,7 @@ test("folder discover expands a Search Candidate to immediate files and reusable
     assert.equal(folder.files[3].eligible, false);
     assert.equal(folder.files[3].isLocked, true);
     assert.deepEqual(JSON.parse(f.calls.at(-1).body), { directory: "Albums\\A&B [Deluxe]" });
-    const shown = await run(["folder", "show", folder.folderRef, "--yes"], f);
+    const shown = await run(["search", "folder", folder.folderRef, "--yes"], f);
     assert.equal(shown.code, 0, shown.stdout);
     assert.deepEqual(JSON.parse(shown.stdout).result, folder);
     assert.equal(
@@ -138,10 +138,10 @@ test("folder discover expands a Search Candidate to immediate files and reusable
   }
 });
 
-test("folder commands require acknowledgement before contacting slskd", async () => {
+test("search folder requires acknowledgement before contacting slskd", async () => {
   const f = await fixture();
   try {
-    const result = await run(["folder", "show", "folder_e30"], f);
+    const result = await run(["search", "folder", "folder_e30"], f);
     assert.equal(result.code, 2);
     assert.equal(f.calls.length, 0);
   } finally {
@@ -149,11 +149,11 @@ test("folder commands require acknowledgement before contacting slskd", async ()
   }
 });
 
-test("folder show accepts a complete empty directory and rejects malformed listings", async () => {
+test("search folder accepts a complete empty directory and rejects malformed listings", async () => {
   const empty = await fixture([{ name: "Albums\\A&B [Deluxe]", files: [] }]);
   try {
     const result = await run(
-      ["folder", "show", "folder_WyJhbGljZSIsIkFsYnVtc1xcQSZCIFtEZWx1eGVdIl0", "--yes"],
+      ["search", "folder", "folder_WyJhbGljZSIsIkFsYnVtc1xcQSZCIFtEZWx1eGVdIl0", "--yes"],
       empty,
     );
     assert.equal(result.code, 0, result.stdout);
@@ -165,7 +165,7 @@ test("folder show accepts a complete empty directory and rejects malformed listi
   const incomplete = await fixture([{ name: "Albums\\A&B [Deluxe]" }]);
   try {
     const result = await run(
-      ["folder", "show", "folder_WyJhbGljZSIsIkFsYnVtc1xcQSZCIFtEZWx1eGVdIl0", "--yes"],
+      ["search", "folder", "folder_WyJhbGljZSIsIkFsYnVtc1xcQSZCIFtEZWx1eGVdIl0", "--yes"],
       incomplete,
     );
     assert.equal(result.code, 7);
@@ -175,12 +175,12 @@ test("folder show accepts a complete empty directory and rejects malformed listi
   }
 });
 
-test("folder discovery rejects missing, ambiguous and duplicate file listings", async () => {
+test("search folder rejects missing, ambiguous and duplicate file listings", async () => {
   const missing = await fixture([{ name: "Other", files: [] }]);
   try {
     const candidates = await run(["search", "candidates", SEARCH_ID], missing);
     const cid = JSON.parse(candidates.stdout).result.candidates[0].candidateId;
-    const result = await run(["folder", "discover", SEARCH_ID, cid, "--yes"], missing);
+    const result = await run(["search", "folder", SEARCH_ID, cid, "--yes"], missing);
     assert.equal(result.code, 7);
     assert.equal(JSON.parse(result.stdout).error.code, "UNAVAILABLE_FOLDER");
   } finally {
@@ -193,7 +193,7 @@ test("folder discovery rejects missing, ambiguous and duplicate file listings", 
   ]);
   try {
     const result = await run(
-      ["folder", "show", "folder_WyJhbGljZSIsIkFsYnVtc1xcQSZCIFtEZWx1eGVdIl0", "--yes"],
+      ["search", "folder", "folder_WyJhbGljZSIsIkFsYnVtc1xcQSZCIFtEZWx1eGVdIl0", "--yes"],
       duplicateDirs,
     );
     assert.equal(result.code, 7);
@@ -213,7 +213,7 @@ test("folder discovery rejects missing, ambiguous and duplicate file listings", 
   ]);
   try {
     const result = await run(
-      ["folder", "show", "folder_WyJhbGljZSIsIkFsYnVtc1xcQSZCIFtEZWx1eGVdIl0", "--yes"],
+      ["search", "folder", "folder_WyJhbGljZSIsIkFsYnVtc1xcQSZCIFtEZWx1eGVdIl0", "--yes"],
       duplicateFiles,
     );
     assert.equal(result.code, 7);
@@ -231,7 +231,7 @@ test("folder references preserve peer scope and reject traversal, while request 
   try {
     const candidates = await run(["search", "candidates", SEARCH_ID], peerListing);
     const cid = JSON.parse(candidates.stdout).result.candidates[0].candidateId;
-    const discovered = await run(["folder", "discover", SEARCH_ID, cid, "--yes"], peerListing);
+    const discovered = await run(["search", "folder", SEARCH_ID, cid, "--yes"], peerListing);
     assert.equal(discovered.code, 0, discovered.stdout);
     const folder = JSON.parse(discovered.stdout).result;
     assert.equal(folder.username, peer);
@@ -243,7 +243,7 @@ test("folder references preserve peer scope and reject traversal, while request 
   const malicious = `folder_${Buffer.from(JSON.stringify(["alice", "..\\outside"])).toString("base64url")}`;
   const invalidRefFixture = await fixture();
   try {
-    const result = await run(["folder", "show", malicious, "--yes"], invalidRefFixture);
+    const result = await run(["search", "folder", malicious, "--yes"], invalidRefFixture);
     assert.equal(result.code, 2);
     assert.equal(
       invalidRefFixture.calls.some((call) => call.url.includes("/directory")),
@@ -256,7 +256,7 @@ test("folder references preserve peer scope and reject traversal, while request 
   const unavailable = await fixture([], { directoryStatus: 404 });
   try {
     const result = await run(
-      ["folder", "show", "folder_WyJhbGljZSIsIkFsYnVtc1xcQSZCIFtEZWx1eGVdIl0", "--yes"],
+      ["search", "folder", "folder_WyJhbGljZSIsIkFsYnVtc1xcQSZCIFtEZWx1eGVdIl0", "--yes"],
       unavailable,
     );
     assert.equal(result.code, 7);
@@ -269,8 +269,8 @@ test("folder references preserve peer scope and reject traversal, while request 
   try {
     const result = await run(
       [
+        "search",
         "folder",
-        "show",
         "folder_WyJhbGljZSIsIkFsYnVtc1xcQSZCIFtEZWx1eGVdIl0",
         "--yes",
         "--timeout-ms",
@@ -298,7 +298,7 @@ test("malformed immediate file metadata remains visible and ineligible", async (
   ]);
   try {
     const result = await run(
-      ["folder", "show", "folder_WyJhbGljZSIsIkFsYnVtc1xcQSZCIFtEZWx1eGVdIl0", "--yes"],
+      ["search", "folder", "folder_WyJhbGljZSIsIkFsYnVtc1xcQSZCIFtEZWx1eGVdIl0", "--yes"],
       f,
     );
     assert.equal(result.code, 0, result.stdout);
@@ -316,7 +316,7 @@ test("candidate usernames with control characters are rejected before browsing",
   try {
     const candidates = await run(["search", "candidates", SEARCH_ID], f);
     const cid = JSON.parse(candidates.stdout).result.candidates[0].candidateId;
-    const result = await run(["folder", "discover", SEARCH_ID, cid, "--yes"], f);
+    const result = await run(["search", "folder", SEARCH_ID, cid, "--yes"], f);
     assert.equal(result.code, 2);
     assert.equal(JSON.parse(result.stdout).error.code, "INVALID_INPUT");
     assert.equal(
