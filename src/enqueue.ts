@@ -29,6 +29,7 @@ export async function transferEnqueue(
 
   const id = deterministicBatchId([searchId, candidateId]);
   let response: unknown;
+  let batchExisted = false;
   try {
     response = await request(
       ctx,
@@ -47,6 +48,7 @@ export async function transferEnqueue(
       !(error instanceof CliError && error.code === "REMOTE" && error.message.includes("HTTP 409"))
     )
       throw error;
+    batchExisted = true;
     response = await request(ctx, "GET", `/transfers/downloads/batches/${id}`);
   }
 
@@ -64,7 +66,7 @@ export async function transferEnqueue(
   );
   if (!transfer?.id) {
     const reconciled = (await transferList(ctx)).find(match);
-    if (reconciled) return { searchId, candidateId, existing: false, transfer: reconciled };
+    if (reconciled) return { searchId, candidateId, existing: batchExisted, transfer: reconciled };
     throw new CliError(
       "AMBIGUOUS_MUTATION",
       "slskd accepted the enqueue, but no matching Transfer could be identified. Query slskd before retrying.",
@@ -74,7 +76,7 @@ export async function transferEnqueue(
   return {
     searchId,
     candidateId,
-    existing: false,
+    existing: batchExisted,
     transfer: await transferInspect(ctx, candidate.username, transfer.id),
   };
 }
