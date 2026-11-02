@@ -7,6 +7,9 @@ The package name is `slskd-cli`; the executable is `slskd`.
 The proposed version is `0.1.0-beta.1`, with the `next` distribution tag.
 The owner must confirm the version before publication.
 The preview includes Search, Candidate, folder, Transfer, and Private message commands.
+Changes enter `main` through a PR with passing CI and approval.
+After merge and successful `main` CI, a release tag points to the approved `main` commit.
+Publication follows that tag as a future step.
 Keep the current JSON envelopes, exit codes, and explicit mutation acknowledgement.
 Do not add features or unrelated refactors to this release.
 
@@ -63,7 +66,7 @@ Do not use a global Transfer clear against an instance containing unrelated down
 
 ## Delivery and recovery
 
-Freeze the source commit, package version, tarball checksum, and release notes before publication.
+Freeze the tagged `main` commit, package version, tarball checksum, and release notes before publication.
 Confirm npm publisher access and package name availability before finalizing installation instructions.
 Document the first-publication authentication path before configuring automated publication.
 Prefer trusted publishing when the account and repository setup support it.

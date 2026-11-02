@@ -5,6 +5,20 @@ Its npm distribution tag is `next`.
 Release work and acceptance gates live in Beads epic `slskd-cli-4a9`.
 This procedure does not authorize commits, tags, pushes, remote synchronization, or publication.
 
+## Review and merge through a PR
+
+All release changes enter `main` through a pull request.
+Open the PR from the prepared branch with `main` as its base.
+CI runs on PRs targeting `main` and on pushes to `main` after merge.
+Both Linux and macOS checks must pass for the current PR revision.
+Resolve review findings and obtain the required approval before merging.
+Merge only when the PR is approved and ready.
+
+Merging prepares `main` for release. It does not publish a package.
+The release tag must point to a commit on `main`, after its CI checks pass.
+Tag creation and publication are later steps with their own release gates.
+Publishing automation is future work.
+
 ## Verify the candidate
 
 Use the pnpm version declared in `package.json` and Node.js 24.
@@ -24,7 +38,8 @@ CI runs these checks on Linux and macOS.
 The package check also runs all CLI tests from the installed tarball, without source files or development dependencies.
 A local pass does not establish that both CI jobs passed.
 Successful CI jobs retain their exact verified tarballs for seven days.
-Download a tarball from the approved CI run when preparing publication.
+For publication, download the tarball from successful CI for the tagged `main` commit.
+Branch and PR tarballs provide review evidence; they are not the final publication candidate.
 The `SLSKD_PACKAGE_ARTIFACT_DIR` environment variable also retains the verified tarball during a local package check.
 Resolve high or critical production dependency advisories before publication.
 Assess build and test dependency risks separately when dependencies change.
@@ -52,11 +67,21 @@ Configure the repository and workflow identity exactly as npm requires.
 Do not store long-lived publishing credentials in the repository or CI workflow.
 The current CI workflow only verifies packages; it does not publish them.
 
-## Publish after authorization
+## Tag main before publication
 
 After all release blockers close, obtain explicit authorization for publication and Git release operations.
+Select the approved commit on `main` after its CI checks pass.
+Confirm that `package.json` and `CHANGELOG.md` describe `0.1.0-beta.1`.
+Create `v0.1.0-beta.1` at that `main` commit and push the tag.
+Use `CHANGELOG.md` for the release notes.
+
+## Publish the tagged main commit — future step
+
+Publication follows the release tag. It never publishes directly from the preparation branch or PR.
+Before publication, verify that the tag points to a commit contained in `main`.
+Verify that the successful `main` CI run and publication tarball match that tagged commit.
 Keep the publication artifact outside the source checkout.
-Build it from the approved source commit and inspect the resulting tarball:
+If the retained artifact expired, rebuild the tagged commit and repeat every candidate check before publication:
 
 ```sh
 pnpm build
@@ -70,8 +95,6 @@ Publish the reviewed artifact with an explicit preview tag:
 npm publish /absolute/path/to/release-artifacts/slskd-cli-0.1.0-beta.1.tgz --tag next --access public --registry=https://registry.npmjs.org/
 ```
 
-Create `v0.1.0-beta.1` from the approved commit and use `CHANGELOG.md` for the release notes.
-Follow the owner's authorized order for Git push, tag push, and publication.
 Remove the README's unpublished notice only when the registry package is verified.
 
 Install the exact published version in a clean environment:
