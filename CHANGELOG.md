@@ -1,8 +1,16 @@
 # Changelog
 
-## 0.1.0-beta.1 — Unreleased
+## Unreleased
 
-First public preview of the agent-first `slskd` command, distributed through the `slskd-cli` npm package.
+### Development
+
+- Create missing annotated version tags after successful `main` CI; preserve existing tags and reject conflicts.
+- Document release PR approval, automatic tagging, and the separate future npm publication step.
+
+## 0.1.0-beta.1 — Not published to npm
+
+First public preview of the agent-first `slskd` command, packaged as `slskd-cli`.
+The source tag exists. Registry publication remains pending.
 
 ### Added
 

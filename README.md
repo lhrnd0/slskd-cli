@@ -4,15 +4,15 @@
 
 ## Install and build
 
-The first public preview is being prepared as `0.1.0-beta.1` under the npm `next` tag.
-It is not published yet. After publication, install the preview with:
+The source tag [v0.1.0-beta.1](https://github.com/lhrnd0/slskd-cli/tree/v0.1.0-beta.1) exists.
+The npm package is not published yet. After publication, install the preview under the `next` tag:
 
 ```sh
 npm install --global slskd-cli@next --registry=https://registry.npmjs.org/
 slskd --help
 ```
 
-Preview validation targets Linux and macOS with Node.js 24.
+CI checks Linux and macOS with Node.js 24.
 Windows support remains unverified.
 The CLI uses the [MIT license](LICENSE).
 See the [release procedure](docs/releasing.md) for package checks and publication requirements.
@@ -40,6 +40,19 @@ The project declares its pnpm version in `package.json`. Run `corepack enable` o
 Run `pnpm format` to apply the repository's oxfmt rules. `pnpm lint:fix` applies safe oxlint fixes.
 
 Contributions use [Conventional Commits](CONTRIBUTING.md#commit-messages). The repository's Git hook validates commit messages locally.
+
+## Release process
+
+Release changes enter `main` through a PR.
+A release PR updates the version in `package.json` and the corresponding entry in `CHANGELOG.md`.
+After CI passes and reviewers approve the PR, merge it into `main`.
+Successful `main` CI creates the missing annotated `v<version>` tag automatically.
+Existing version tags stay at their original commits.
+PR checks and manual CI runs do not create tags.
+
+Tag creation does not publish the npm package.
+Publication remains a future step, using the verified artifact from the tagged `main` commit.
+See [Contributing](CONTRIBUTING.md#pull-requests) and the [release procedure](docs/releasing.md) for checks, publication gates, and recovery.
 
 ## Issue tracking with Beads
 

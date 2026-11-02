@@ -4,11 +4,12 @@
 
 Ship the current agent-first CLI through npm.
 The package name is `slskd-cli`; the executable is `slskd`.
-The proposed version is `0.1.0-beta.1`, with the `next` distribution tag.
-The owner must confirm the version before publication.
+The first preview source tag is `v0.1.0-beta.1`; its intended npm distribution tag is `next`.
+Registry publication remains pending.
 The preview includes Search, Candidate, folder, Transfer, and Private message commands.
 Changes enter `main` through a PR with passing CI and approval.
-After merge and successful `main` CI, a release tag points to the approved `main` commit.
+After merge and successful `main` CI, the tag job creates a missing version tag at the verified commit.
+Existing matching tags stay unchanged; release PRs use a new package version.
 Publication follows that tag as a future step.
 Keep the current JSON envelopes, exit codes, and explicit mutation acknowledgement.
 Do not add features or unrelated refactors to this release.
@@ -16,19 +17,19 @@ Do not add features or unrelated refactors to this release.
 Tasks live in Beads under `slskd-cli-4a9`.
 This document records release decisions and evidence; Beads holds task status and dependencies.
 
-## Observed baseline
+## Historical baseline before release preparation
 
 The planning session started on 2026-11-01 in America/Sao_Paulo.
 The inspected source commit is `2fb46ed`.
 The working tree was clean before planning.
-The package declares version `0.1.0`, Node.js `>=24`, and pnpm `12.14.0`.
+At that commit, the package declared version `0.1.0`, Node.js `>=24`, and pnpm `12.14.0`.
 Lint, formatting, type checking, build, and all 80 tests passed.
 No tracked release workflow, license, changelog, or Git tags were found.
-Package metadata has no license, repository, bugs, or homepage fields.
+Package metadata lacked license, repository, bugs, and homepage fields.
 The public registry returned `E404` for `slskd-cli`; publisher access and name eligibility remain unverified.
 The shell's configured registry, `https://registry.example.invalid`, failed DNS resolution.
 Release checks must target the intended public registry explicitly.
-The existing live-message issue records connection failure and timeout against the configured slskd instance.
+The existing live-message issue recorded connection failure and timeout against the configured slskd instance.
 
 ## Ordered work
 
@@ -42,7 +43,6 @@ The existing live-message issue records connection failure and timeout against t
 | 5     | `slskd-cli-mdp` | Verify Private messages against live slskd with a known test recipient.                    |
 | 6     | `slskd-cli-ttv` | Prepare release notes, obtain publication authorization, and verify the published package. |
 
-Package preparation can proceed while the two bugs are fixed.
 Live validation must use the fixed release candidate.
 Publication depends on package checks, CI, live Workflow evidence, and live message evidence.
 Each task includes acceptance criteria and verification details in Beads.
@@ -54,7 +54,7 @@ After packaging, install the tarball in a clean temporary prefix without develop
 Run the installed executable's offline help and a fixture-backed `check`.
 Inspect package contents for runtime imports, README, license, and accidental credential or development files.
 Audit production dependencies and assess any high or critical findings before release.
-Verify Linux, macOS, and Windows in CI, or document a narrower preview support statement.
+CI validates Linux and macOS. Windows support remains unverified.
 
 Live checks start with slskd `0.26.1` and record the exact tested daemon version.
 The current README claims support for `0.26.1` or later.
@@ -70,8 +70,9 @@ Freeze the tagged `main` commit, package version, tarball checksum, and release 
 Confirm npm publisher access and package name availability before finalizing installation instructions.
 Document the first-publication authentication path before configuring automated publication.
 Prefer trusted publishing when the account and repository setup support it.
-Explicit owner authorization is required before commits, tags, pushes, remote sync, or publication.
-Planning does not grant that authorization.
+Changes enter `main` through approved PRs.
+The owner approved automatic version tags after successful `main` CI.
+Publication and Dolt remote synchronization still require explicit authorization.
 
 After publication, install the exact registry version in a clean environment.
 Verify help, configuration, and `check` through the installed `slskd` executable.
@@ -88,9 +89,10 @@ Never cancel successful Transfers as release recovery.
 ## Decisions still needed
 
 The owner selected MIT. The npm publisher identity still needs confirmation.
-The version `0.1.0-beta.1` and tag `next` are proposals.
-A reachable slskd instance, test-owned download data, and a message test recipient are required.
-Confirm the supported operating systems from CI evidence.
+The source tag `v0.1.0-beta.1` exists; the intended npm preview tag is `next`.
+Read-only checks passed against the reachable slskd `0.26.1.0` instance.
+The owner postponed live download and message mutation checks.
+Those checks still require test-owned download data and a known message recipient.
 Do not close `slskd-cli-whx` solely because folder commands exist.
 Compare its acceptance criteria with implementation and test evidence before changing its status.
 The cleanup issues `slskd-cli-0ez` and `slskd-cli-cpn` remain outside the preview blockers.
