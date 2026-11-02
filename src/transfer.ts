@@ -105,7 +105,9 @@ function missingTransfer(): CliError {
 
 async function getRaw(ctx: Context, username: string, id: string): Promise<unknown> {
   try {
-    return await request(ctx, "GET", transferPath(username, id));
+    const transfer = await request(ctx, "GET", transferPath(username, id));
+    if (object(transfer)?.username !== username) throw missingTransfer();
+    return transfer;
   } catch (error) {
     if (isNotFound(error)) throw missingTransfer();
     throw error;

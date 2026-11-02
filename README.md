@@ -4,6 +4,21 @@
 
 ## Install and build
 
+The first public preview is being prepared as `0.1.0-beta.1` under the npm `next` tag.
+It is not published yet. After publication, install the preview with:
+
+```sh
+npm install --global slskd-cli@next --registry=https://registry.npmjs.org/
+slskd --help
+```
+
+Preview validation targets Linux and macOS with Node.js 24.
+Windows support remains unverified.
+The CLI uses the [MIT license](LICENSE).
+See the [release procedure](docs/releasing.md) for package checks and publication requirements.
+
+For development, install dependencies and run the checks:
+
 ```sh
 pnpm install --frozen-lockfile
 pnpm lint
@@ -11,8 +26,14 @@ pnpm format:check
 pnpm typecheck
 pnpm build
 pnpm test
-pnpm pack --dry-run
+pnpm package:check
 ```
+
+`package:check` builds and packs the CLI, then installs it into a temporary global prefix.
+It verifies package contents, offline help, and `check` against a fixture slskd server.
+It then runs all CLI tests against the installed package, without the source tree or development dependencies.
+It installs only production dependencies and disables installation scripts.
+The check uses the public npm registry and removes its temporary files afterward.
 
 The project declares its pnpm version in `package.json`. Run `corepack enable` once if your Node.js installation includes Corepack but pnpm is not available.
 
@@ -87,7 +108,7 @@ pnpm link --global
 slskd --help
 ```
 
-The npm package exposes `slskd` from `dist/cli.js`. After publication, install it with `pnpm add --global slskd-cli`. During development, either use `node dist/cli.js` in place of `slskd` below or create the global link shown above.
+The npm package exposes `slskd` from `dist/cli.js`. After preview publication, install it with `pnpm add --global slskd-cli@next --registry=https://registry.npmjs.org/`. During development, either use `node dist/cli.js` in place of `slskd` below or create the global link shown above.
 
 ## Help
 

@@ -18,6 +18,7 @@ test("package exposes the slskd executable", () => {
 async function fixture(options = {}) {
   const calls = [];
   let transfer = null;
+  let batch = null;
   let searchDeleted = false;
   const startedAt = options.startedAt ?? new Date().toISOString();
   const searchId = options.searchId ?? SEARCH_ID;
@@ -83,11 +84,18 @@ async function fixture(options = {}) {
         state: "Queued",
         bytesTransferred: 0,
       };
-      return send(201, { batch: { id: payload.id, transfers: [transfer] }, failures: [] });
+      batch = { id: payload.id, transfers: options.emptyBatch ? [] : [transfer] };
+      if (options.conflictBatch) return send(409, {});
+      return send(201, { batch, failures: [] });
     }
-    if (path === `/api/v0/transfers/downloads/alice/${TRANSFER_ID}` && req.method === "GET")
+    if (batch && path === `/api/v0/transfers/downloads/batches/${batch.id}` && req.method === "GET")
+      return send(200, batch);
+    // slskd resolves individual downloads by ID, even when the route username differs.
+    const transferRoute =
+      path.startsWith("/api/v0/transfers/downloads/") && path.endsWith(`/${TRANSFER_ID}`);
+    if (transferRoute && req.method === "GET")
       return transfer ? send(200, transfer) : send(404, {});
-    if (path === `/api/v0/transfers/downloads/alice/${TRANSFER_ID}` && req.method === "DELETE") {
+    if (transferRoute && req.method === "DELETE") {
       if (!transfer) return send(404, {});
       if (req.url.includes("remove=true")) transfer = null;
       else transfer.state = "Cancelled";
@@ -391,6 +399,39 @@ test("cancellation is idempotent; clear and delete require separate acknowledgem
   }
 });
 
+for (const command of ["show", "cancel", "delete"]) {
+  test(`Transfer ${command} rejects a mismatched username without mutation`, async () => {
+    const host = await fixture();
+    const env = { SLSKD_BASE_URL: host.url, SLSKD_API_KEY: "secret" };
+    host.setTransfer({
+      id: TRANSFER_ID,
+      username: "alice",
+      filename: PATH,
+      size: 1234,
+      state: "Queued",
+      bytesTransferred: 0,
+    });
+    try {
+      const result = await cli(
+        ["transfer", command, "bob", TRANSFER_ID, ...(command === "show" ? [] : ["--yes"])],
+        env,
+      );
+      assert.equal(result.code, 7);
+      assert.equal(result.json.error.code, "TRANSFER_NOT_FOUND");
+      assert.equal(
+        host.calls.some((call) => call.method === "DELETE"),
+        false,
+      );
+      const unchanged = await cli(["transfer", "show", "alice", TRANSFER_ID], env);
+      assert.equal(unchanged.code, 0);
+      assert.equal(unchanged.json.result.username, "alice");
+      assert.equal(unchanged.json.result.state, "Queued");
+    } finally {
+      await host.close();
+    }
+  });
+}
+
 test("Transfer inspection reports active progress and failure from slskd", async () => {
   const host = await fixture();
   const env = { SLSKD_BASE_URL: host.url, SLSKD_API_KEY: "secret" };
@@ -427,6 +468,30 @@ test("Transfer inspection reports active progress and failure from slskd", async
     await host.close();
   }
 });
+
+for (const emptyBatch of [false, true]) {
+  test(`concurrent enqueue reports an existing Transfer through ${emptyBatch ? "download lookup" : "batch lookup"}`, async () => {
+    const host = await fixture({ conflictBatch: true, emptyBatch });
+    const env = { SLSKD_BASE_URL: host.url, SLSKD_API_KEY: "secret" };
+    try {
+      const candidateId = (await cli(["search", "candidates", SEARCH_ID], env)).json.result
+        .candidates[0].candidateId;
+      const result = await cli(["transfer", "enqueue", SEARCH_ID, candidateId, "--yes"], env);
+      assert.equal(result.code, 0);
+      assert.equal(result.json.result.existing, true);
+      assert.equal(result.json.result.transfer.id, TRANSFER_ID);
+      assert.equal(result.json.result.transfer.username, "alice");
+      assert.equal(host.calls.filter((call) => call.method === "POST").length, 1);
+      assert.equal(
+        host.calls.filter((call) => call.method === "GET" && call.path.includes("/batches/"))
+          .length,
+        1,
+      );
+    } finally {
+      await host.close();
+    }
+  });
+}
 
 test("a timed-out enqueue is an ambiguous mutation and is not retried", async () => {
   const host = await fixture({ delayBatch: 200 });
