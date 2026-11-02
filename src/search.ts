@@ -253,6 +253,14 @@ export async function searchCandidates(ctx: Context, searchId: string): Promise<
 
 export type SearchWatchEvent =
   | { event: "started"; searchId: string }
+  | {
+      event: "progress";
+      searchId: string;
+      state: string;
+      responseCount: number | null;
+      fileCount: number | null;
+      lockedFileCount: number | null;
+    }
   | { event: "candidate"; searchId: string; candidate: Candidate }
   | {
       event: "ended";
@@ -335,6 +343,14 @@ export async function* searchWatch(
     while (true) {
       controller.signal.throwIfAborted();
       const completed = collectionCompleted(search);
+      yield {
+        event: "progress",
+        searchId,
+        state: search.state as string,
+        responseCount: numberOrNull(search.responseCount),
+        fileCount: numberOrNull(search.fileCount),
+        lockedFileCount: numberOrNull(search.lockedFileCount),
+      };
       let responses: unknown;
       try {
         responses = await request(

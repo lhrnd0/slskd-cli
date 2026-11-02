@@ -2,5 +2,6 @@
 hooks = true
 
 [mcp_servers.codegraph]
-command = "pnpm"
-args = ["exec", "codegraph", "serve", "--mcp"]
+command = "/bin/zsh"
+args = ["-c", 'export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"; source "$NVM_DIR/nvm.sh" --no-use || exit; nvm use --silent default >&2 || exit; source "$HOME/.config/npm-registry-fallback.zsh" || exit; _npm_registry_fallback_apply pnpm || exit; exec pnpm exec codegraph serve --mcp']
+startup_timeout_sec = 120

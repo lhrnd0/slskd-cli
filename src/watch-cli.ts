@@ -28,6 +28,15 @@ export async function runSearchWatch(
   options: { pollIntervalMs: number; watchTimeoutSeconds: number },
 ): Promise<void> {
   searchId = canonicalSearchId(searchId);
+  await runObservation(ctx, (watchCtx) => searchWatch(watchCtx, searchId, options), { searchId });
+}
+
+/** Shared lifecycle for read-only NDJSON observers. */
+export async function runObservation(
+  ctx: Context,
+  observe: (watchCtx: Context) => AsyncIterable<unknown>,
+  errorContext: Record<string, unknown> = {},
+): Promise<void> {
   const controller = new AbortController();
   const stop = (exitCode: number) => {
     controller.abort(new ObservationStopped(exitCode));
@@ -45,7 +54,7 @@ export async function runSearchWatch(
   const watchCtx = { ...ctx, signal: controller.signal };
   try {
     await compatible(watchCtx);
-    for await (const event of searchWatch(watchCtx, searchId, options)) {
+    for await (const event of observe(watchCtx)) {
       await writeRecord({ ok: true, result: event }, controller.signal);
     }
   } catch (error) {
@@ -59,7 +68,7 @@ export async function runSearchWatch(
     process.exitCode = typed.exitCode;
     try {
       await writeRecord(
-        { ok: false, searchId, error: { code: typed.code, message: typed.message } },
+        { ok: false, ...errorContext, error: { code: typed.code, message: typed.message } },
         controller.signal,
       );
     } catch (writeError) {

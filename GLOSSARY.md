@@ -4,6 +4,26 @@ This project provides an agent-first command-line interface for a trusted user's
 
 ## Language
 
+**Private message**:
+A one-to-one message between the Soulseek account connected to the slskd instance and another Soulseek username.
+_Avoid_: room message, chat-room message
+
+**Conversation**:
+The private-message exchange between the Soulseek account connected to the slskd instance and one other Soulseek username.
+_Avoid_: chat room, Workflow
+
+**Message acknowledgement**:
+The explicit acknowledgement of an incoming Private message by the local slskd account. It does not establish that a remote recipient has read an outgoing message.
+_Avoid_: read receipt, delivery confirmation
+
+**Unacknowledged message**:
+An incoming Private message that slskd currently reports as awaiting Message acknowledgement.
+_Avoid_: guaranteed unread message, unseen message
+
+**Message identifier**:
+An opaque reference to one Private message in a Conversation, including its timestamp as part of its identity.
+_Avoid_: numeric server ID, delivery receipt
+
 **Agent-first CLI**:
 A command-line interface with machine-readable results, stable exit codes, and non-interactive operation suitable for an agent or automation to compose.
 _Avoid_: conversational CLI, human-only CLI
@@ -17,7 +37,7 @@ The locally configured slskd base URL and API key used by the CLI to authenticat
 _Avoid_: embedded credential, anonymous connection
 
 **ReadWrite API key**:
-The least-privilege slskd API key role required by this CLI to query searches and create or cancel transfers.
+The least-privilege slskd API key role required by this CLI to query Searches, manage Transfers, send Private messages, and acknowledge incoming messages.
 _Avoid_: Administrator key, ReadOnly key
 
 **Compatible slskd**:
@@ -69,7 +89,7 @@ A cancellation request that reports a completed or already-cancelled transfer as
 _Avoid_: cancellation failure, repeated cancellation
 
 **State-changing command**:
-A CLI command that modifies the slskd instance, such as enqueuing, cancelling, clearing, or deleting a Search or Transfer. It requires its own literal `--yes` acknowledgement.
+A CLI command that modifies the slskd instance, such as changing a Search or Transfer, sending a Private message, or performing Message acknowledgement. It requires its own literal `--yes` acknowledgement.
 _Avoid_: query, inspection command
 
 **Workflow state**:
