@@ -1,5 +1,24 @@
 # Contributing
 
+## Pull requests
+
+Create a branch from `main` and open a PR targeting `main`.
+Describe the change and include validation evidence.
+Both Linux and macOS CI jobs must pass for the current PR revision.
+Resolve review findings and obtain approval before merging.
+After merge, CI checks the resulting `main` commit again.
+
+## Release PRs
+
+A release PR changes `package.json` to a new version and adds its entry to `CHANGELOG.md`.
+Ordinary PRs keep the version unchanged.
+After merge and successful `main` checks, CI creates the missing annotated `v<version>` tag.
+Existing matching tags remain unchanged. CI fails if a tag conflicts with the verified commit or package version.
+Do not create or move release tags from a PR branch.
+
+Source tagging and npm publication are separate steps.
+Publication is future work and requires the gates in the [release procedure](docs/releasing.md).
+
 ## Commit messages
 
 All commits must follow [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/):
