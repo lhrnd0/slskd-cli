@@ -3,14 +3,18 @@
 The first public preview candidate is `0.1.0-beta.1`.
 Its npm distribution tag is `next`.
 Release work and acceptance gates live in Beads epic `slskd-cli-4a9`.
-This procedure does not authorize commits, tags, pushes, remote synchronization, or publication.
+The source tag exists; npm publication remains pending.
+
+```text
+release PR → CI and approval → merge to main → main CI → automatic tag → future publication
+```
 
 ## Review and merge through a PR
 
 All release changes enter `main` through a pull request.
 Open the PR from the prepared branch with `main` as its base.
 CI runs on PRs targeting `main` and on pushes to `main` after merge.
-Both Linux and macOS checks must pass for the current PR revision.
+Both Linux and macOS quality jobs must pass for the current PR revision.
 Resolve review findings and obtain the required approval before merging.
 Merge only when the PR is approved and ready.
 
@@ -61,8 +65,7 @@ An npm registry `E404` does not prove the name can be registered.
 The owner selected MIT for this release.
 Confirm that the release version and notes match the candidate artifact.
 
-Use the public npm registry explicitly.
-The planning environment's default registry failed DNS resolution at `registry.example.invalid`.
+Use the public npm registry explicitly for release commands.
 
 Choose the first-publication authentication path with the package owner.
 For subsequent automation, prefer [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/) when supported.
@@ -75,10 +78,16 @@ The current CI workflow verifies packages and tags verified `main` commits; it d
 A release PR updates the version in `package.json` and its entry in `CHANGELOG.md`.
 After approval and merge, successful `main` CI creates the missing version tag automatically.
 Ordinary PRs keep the version unchanged, so the tag job preserves the existing tag.
+When a tag job reports that the tag already exists, the run succeeded without creating another release.
+To inspect a tag, use the repository's [tags page](https://github.com/lhrnd0/slskd-cli/tags).
 The current `v0.1.0-beta.1` tag remains at its original approved `main` commit.
 Future releases need a new version; do not move the existing tag to include later changes.
 Use the matching `CHANGELOG.md` entry for release notes.
 Tag creation does not close the live validation or npm access gates for publication.
+
+If a tag job fails, inspect its logs before changing the version or retrying.
+Invalid versions, commits outside `main`, and conflicting tags stop the job.
+Resolve the cause through a new PR. Do not delete or move an existing release tag to make CI pass.
 
 ## Publish the tagged main commit — future step
 
