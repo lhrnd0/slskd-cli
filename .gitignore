@@ -9,3 +9,30 @@ node_modules/
 dist/
 *.tgz
 .perles/
+
+# Local environment and registry credentials
+.env
+.env.*
+!.env.example
+!.env.*.example
+!.env.sample
+!.env.*.sample
+.npmrc
+
+# Private keys and credential bundles
+*.key
+*.pem
+*.p12
+*.pfx
+id_rsa
+id_rsa.*
+id_dsa
+id_dsa.*
+id_ecdsa
+id_ecdsa.*
+id_ed25519
+id_ed25519.*
+!id_rsa.pub
+!id_dsa.pub
+!id_ecdsa.pub
+!id_ed25519.pub
