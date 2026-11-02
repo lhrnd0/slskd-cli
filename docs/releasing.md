@@ -23,6 +23,9 @@ pnpm package:check
 CI runs these checks on Linux and macOS.
 The package check also runs all CLI tests from the installed tarball, without source files or development dependencies.
 A local pass does not establish that both CI jobs passed.
+Successful CI jobs retain their exact verified tarballs for seven days.
+Download a tarball from the approved CI run when preparing publication.
+The `SLSKD_PACKAGE_ARTIFACT_DIR` environment variable also retains the verified tarball during a local package check.
 Resolve high or critical production dependency advisories before publication.
 Assess build and test dependency risks separately when dependencies change.
 

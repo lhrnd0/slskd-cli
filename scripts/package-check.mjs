@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { cp, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { copyFile, cp, mkdir, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -98,6 +98,11 @@ try {
   });
   process.stdout.write(tests.stdout);
   process.stderr.write(tests.stderr);
+  const artifactDirectory = process.env.SLSKD_PACKAGE_ARTIFACT_DIR;
+  if (artifactDirectory) {
+    await mkdir(artifactDirectory, { recursive: true });
+    await copyFile(join(temporary, archive.filename), join(artifactDirectory, archive.filename));
+  }
   console.log(`Package installation passed: ${archive.name}@${archive.version}`);
   console.log(`Package integrity: ${archive.integrity}`);
 } finally {
