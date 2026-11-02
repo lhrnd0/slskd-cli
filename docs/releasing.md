@@ -15,8 +15,11 @@ Resolve review findings and obtain the required approval before merging.
 Merge only when the PR is approved and ready.
 
 Merging prepares `main` for release. It does not publish a package.
-The release tag must point to a commit on `main`, after its CI checks pass.
-Tag creation and publication are later steps with their own release gates.
+After both quality jobs pass on a push to `main`, the tag job reads `package.json`.
+It creates an annotated `v<version>` tag at the verified commit when that tag is missing.
+An existing tag with the same package version on an ancestor commit stays unchanged.
+A conflicting tag stops the job. The job never moves or replaces a tag.
+PR runs and manual workflow runs cannot create release tags.
 Publishing automation is future work.
 
 ## Verify the candidate
@@ -65,19 +68,22 @@ Choose the first-publication authentication path with the package owner.
 For subsequent automation, prefer [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/) when supported.
 Configure the repository and workflow identity exactly as npm requires.
 Do not store long-lived publishing credentials in the repository or CI workflow.
-The current CI workflow only verifies packages; it does not publish them.
+The current CI workflow verifies packages and tags verified `main` commits; it does not publish them.
 
 ## Tag main before publication
 
-After all release blockers close, obtain explicit authorization for publication and Git release operations.
-Select the approved commit on `main` after its CI checks pass.
-Confirm that `package.json` and `CHANGELOG.md` describe `0.1.0-beta.1`.
-Create `v0.1.0-beta.1` at that `main` commit and push the tag.
-Use `CHANGELOG.md` for the release notes.
+A release PR updates the version in `package.json` and its entry in `CHANGELOG.md`.
+After approval and merge, successful `main` CI creates the missing version tag automatically.
+Ordinary PRs keep the version unchanged, so the tag job preserves the existing tag.
+The current `v0.1.0-beta.1` tag remains at its original approved `main` commit.
+Future releases need a new version; do not move the existing tag to include later changes.
+Use the matching `CHANGELOG.md` entry for release notes.
+Tag creation does not close the live validation or npm access gates for publication.
 
 ## Publish the tagged main commit — future step
 
 Publication follows the release tag. It never publishes directly from the preparation branch or PR.
+After all publication blockers close, obtain explicit publication authorization.
 Before publication, verify that the tag points to a commit contained in `main`.
 Verify that the successful `main` CI run and publication tarball match that tagged commit.
 Keep the publication artifact outside the source checkout.
@@ -119,5 +125,13 @@ Move `next` to a verified version when one exists.
 The first preview has no previous published version to restore.
 Do not use successful Transfer cancellation as release recovery.
 Reconcile ambiguous mutations through slskd before repeating any state-changing command.
+
+## Future publishing automation
+
+The tag job pushes with the repository's `GITHUB_TOKEN`.
+Its tag push does not start another workflow automatically.
+Add future publication to the same verified workflow, or explicitly dispatch a separate publication workflow.
+Keep publication authorization and npm access gates in that future implementation.
+See [GitHub token behavior](https://docs.github.com/en/actions/concepts/security/github_token).
 
 See [npm distribution tags](https://docs.npmjs.com/adding-dist-tags-to-packages/) for preview tag management.
