@@ -96,7 +96,13 @@ function streamingCli(args, env = {}) {
       return stdoutClosed;
     },
     recordsSeen,
-    nextRecord() {
+    // Lifecycle tests consume non-progress records; progress tests opt into the full stream.
+    async nextRecord(includeProgress = false) {
+      const record = await this.nextRawRecord();
+      if (!includeProgress && record.result?.event === "progress") return this.nextRecord();
+      return record;
+    },
+    nextRawRecord() {
       if (records.length > 0) return Promise.resolve(records.shift());
       if (!this.alive) return Promise.reject(new Error("CLI exited before another NDJSON record"));
       const waiter = deferred();
@@ -123,6 +129,7 @@ async function watchFixture(options = {}) {
   const bodyGates = [];
   let searchState = options.searchState ?? "InProgress";
   let automaticSnapshot = 0;
+  let searchProgress = {};
   const server = createServer(async (req, res) => {
     for await (const _chunk of req) {
       // Consume the request body so the connection is ready for its response.
@@ -149,7 +156,7 @@ async function watchFixture(options = {}) {
       return send(200, options.version ?? "0.26.1");
     if (url.pathname === `/api/v0/searches/${SEARCH_ID}` && req.method === "GET") {
       if (options.searchHttpStatus) return send(options.searchHttpStatus, {});
-      return send(200, { id: SEARCH_ID, state: searchState });
+      return send(200, { id: SEARCH_ID, state: searchState, ...searchProgress });
     }
     if (url.pathname === `/api/v0/searches/${SEARCH_ID}/responses` && req.method === "GET") {
       if (options.autoResponses) {
@@ -219,6 +226,9 @@ async function watchFixture(options = {}) {
     },
     get requests() {
       return requests;
+    },
+    setSearchProgress(progress) {
+      searchProgress = progress;
     },
     setSearchState(state) {
       searchState = state;
@@ -581,7 +591,9 @@ test(
       signal: null,
     });
     assert.deepEqual(
-      child.recordsSeen.map((record) => record.result?.event),
+      child.recordsSeen
+        .map((record) => record.result?.event)
+        .filter((event) => event !== "progress"),
       ["started"],
     );
     assert.ok(host.requests.every((request) => request.method === "GET"));
@@ -609,9 +621,13 @@ test(
       code: 130,
       signal: null,
     });
-    assert.deepEqual(child.recordsSeen.map((record) => record.result?.event).filter(Boolean), [
-      "started",
-    ]);
+    assert.deepEqual(
+      child.recordsSeen
+        .map((record) => record.result?.event)
+        .filter((event) => event !== "progress")
+        .filter(Boolean),
+      ["started"],
+    );
   },
 );
 
@@ -707,9 +723,13 @@ test(
       searchId: SEARCH_ID,
       error: { code: "EXPIRED_SEARCH", message: "The Search has expired; create a fresh Search." },
     });
-    assert.deepEqual(child.recordsSeen.map((record) => record.result?.event).filter(Boolean), [
-      "started",
-    ]);
+    assert.deepEqual(
+      child.recordsSeen
+        .map((record) => record.result?.event)
+        .filter((event) => event !== "progress")
+        .filter(Boolean),
+      ["started"],
+    );
     assert.equal((await child.closed).code, 7);
   },
 );
@@ -764,10 +784,13 @@ test(
       searchId: SEARCH_ID,
       error: { code: "REMOTE", message: "slskd returned HTTP 500." },
     });
-    assert.deepEqual(child.recordsSeen.map((record) => record.result?.event).filter(Boolean), [
-      "started",
-      "candidate",
-    ]);
+    assert.deepEqual(
+      child.recordsSeen
+        .map((record) => record.result?.event)
+        .filter((event) => event !== "progress")
+        .filter(Boolean),
+      ["started", "candidate"],
+    );
     assert.equal((await child.closed).code, 7);
   },
 );
@@ -861,9 +884,92 @@ test(
     host.release(pendingResponse, [CANDIDATE_ONE]);
     assert.equal((await child.closed).code, 0);
     assert.deepEqual(
-      child.recordsSeen.map((record) => record.result?.event),
+      child.recordsSeen
+        .map((record) => record.result?.event)
+        .filter((event) => event !== "progress"),
       ["started"],
     );
     assert.ok(host.requests.every((request) => request.method === "GET"));
   },
 );
+
+test(
+  "watch reports live counts and idle heartbeats before buffered final Candidates",
+  { timeout: 20_000 },
+  async (t) => {
+    const host = await watchFixture();
+    host.setSearchProgress({ responseCount: 0, fileCount: 0, lockedFileCount: 0 });
+    const child = streamingCli(
+      ["search", "candidates", SEARCH_ID, "--watch", "--poll-interval-ms", "100"],
+      { SLSKD_BASE_URL: host.url, SLSKD_API_KEY: "secret" },
+    );
+    t.after(async () => {
+      await child.stop();
+      await host.close();
+    });
+
+    assert.equal((await child.nextRecord(true)).result.event, "started");
+    const progress = (state, responseCount, fileCount, lockedFileCount) => ({
+      ok: true,
+      result: {
+        event: "progress",
+        searchId: SEARCH_ID,
+        state,
+        responseCount,
+        fileCount,
+        lockedFileCount,
+      },
+    });
+    assert.deepEqual(await child.nextRecord(true), progress("InProgress", 0, 0, 0));
+    const initial = await host.waitForResponseRequest();
+    host.setSearchProgress({ responseCount: 2, fileCount: 10, lockedFileCount: 3 });
+    host.release(initial, []);
+    assert.deepEqual(await child.nextRecord(true), progress("InProgress", 2, 10, 3));
+    const updated = await host.waitForResponseRequest();
+    host.release(updated, []);
+    assert.deepEqual(await child.nextRecord(true), progress("InProgress", 2, 10, 3));
+    assert.equal(child.alive, true, "unchanged counts must not end observation");
+    assert.equal(
+      child.recordsSeen.some((r) => r.result?.event === "candidate"),
+      false,
+    );
+
+    const idle = await host.waitForResponseRequest();
+    host.setSearchState("Completed, TimedOut");
+    host.release(idle, []);
+    assert.deepEqual(await child.nextRecord(true), progress("Completed, TimedOut", 2, 10, 3));
+    const final = await host.waitForResponseRequest();
+    host.release(final, [CANDIDATE_ONE]);
+    assert.equal((await child.nextRecord(true)).result.event, "candidate");
+    assert.deepEqual((await child.nextRecord(true)).result, {
+      event: "ended",
+      searchId: SEARCH_ID,
+      reason: "completed",
+      candidateCount: 1,
+    });
+    assert.equal((await child.closed).code, 0);
+  },
+);
+
+test("watch reports unavailable counts as null", { timeout: 20_000 }, async (t) => {
+  const host = await watchFixture({ searchState: "Completed", autoResponses: [[]] });
+  const child = streamingCli(["search", "candidates", SEARCH_ID, "--watch"], {
+    SLSKD_BASE_URL: host.url,
+    SLSKD_API_KEY: "secret",
+  });
+  t.after(async () => {
+    await child.stop();
+    await host.close();
+  });
+  assert.equal((await child.nextRecord(true)).result.event, "started");
+  assert.deepEqual((await child.nextRecord(true)).result, {
+    event: "progress",
+    searchId: SEARCH_ID,
+    state: "Completed",
+    responseCount: null,
+    fileCount: null,
+    lockedFileCount: null,
+  });
+  assert.equal((await child.nextRecord(true)).result.event, "ended");
+  assert.equal((await child.closed).code, 0);
+});

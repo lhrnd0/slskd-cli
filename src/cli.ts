@@ -12,8 +12,9 @@ import { folderEnqueue } from "./folder-enqueue.js";
 import { transferEnqueue } from "./enqueue.js";
 import { transferCancel, transferClear, transferDelete, transferInspect } from "./transfer.js";
 import { runSearchWatch } from "./watch-cli.js";
+import { MESSAGE_FLAGS, MESSAGE_HELP, runMessageCommand } from "./message-cli.js";
 
-type Flags = Record<string, string | boolean>;
+type Flags = Record<string, string | boolean | string[]>;
 const VALUE_FLAGS = new Set([
   "base-url",
   "api-key",
@@ -22,8 +23,21 @@ const VALUE_FLAGS = new Set([
   "lifetime-seconds",
   "poll-interval-ms",
   "watch-timeout-seconds",
+  "text",
+  "id",
+  "username",
+  "timeout",
 ]);
-const ALL_FLAGS = new Set([...VALUE_FLAGS, "help", "yes", "watch", "all"]);
+const BOOLEAN_FLAGS = new Set([
+  "help",
+  "yes",
+  "watch",
+  "all",
+  "stdin",
+  "unacknowledged",
+  "new-only",
+]);
+const ALL_FLAGS = new Set([...VALUE_FLAGS, ...BOOLEAN_FLAGS]);
 
 class StreamedResult {}
 
@@ -48,6 +62,11 @@ Commands:
   transfer cancel               Cancel a download transfer
   transfer clear                Clear completed downloads
   transfer delete               Delete a transfer record
+  message conversations         List private conversations
+  message list                  Inspect private messages
+  message send                  Send one private message
+  message acknowledge           Acknowledge incoming messages
+  message watch                 Watch incoming private messages
 
 Run "slskd <command> --help" for command-specific help.`,
   ],
@@ -83,12 +102,16 @@ Create a literal slskd search. Lifetime must be between 5 and 300 seconds and de
     `Usage: slskd search candidates <searchId> [--watch] [connection options]
 
 List normalized candidates using the slskd UUID from search create or search list.
-With --watch, stream started, candidate, and ended events as newline-delimited JSON.
+With --watch, stream started, progress, candidate, and ended events as newline-delimited JSON.
 Watch options:
   --poll-interval-ms <ms>          Integer 100..60000; default 1000
   --watch-timeout-seconds <sec>    Integer 1..3600; default 300
+Progress reports state and responseCount, fileCount, lockedFileCount on every poll.
+Counts may rise before Candidates are available; slskd 0.26.1 buffers results until completion.
+Wait for ended with reason completed before treating the Candidates as final.
 A completed Search is drained before ended/completed. The watch deadline emits
 ended/deadline with exit 0, which does not imply collection finished.
+Resume watching the same Search after a deadline; unchanged counts do not mean completion.
 Candidate IDs are emitted once per invocation; a fresh watch replays existing Candidates.
 Request timeouts retain typed errors. SIGINT/SIGTERM stop observation with exit 130/143.
 Watching is read-only and leaves the Search available in slskd.`,
@@ -158,6 +181,7 @@ Clear all completed download records in slskd.`,
 
 Delete one transfer record. An active transfer may be cancelled first.`,
   ],
+  ...MESSAGE_HELP,
 ]);
 
 function helpFor(words: string[], flags: Flags): HelpResult | undefined {
@@ -178,17 +202,20 @@ function parse(argv: string[]): { words: string[]; flags: Flags } {
       words.push(arg);
       continue;
     }
-    const name = arg.slice(2);
-    if (!ALL_FLAGS.has(name) || name in flags)
+    const separator = arg.indexOf("=");
+    const name = arg.slice(2, separator < 0 ? undefined : separator);
+    if (!ALL_FLAGS.has(name) || (name in flags && name !== "id"))
       throw new CliError("INVALID_INPUT", "Unknown or repeated command flag.", 2);
-    if (name === "help" || name === "yes" || name === "watch" || name === "all") {
+    if (BOOLEAN_FLAGS.has(name)) {
+      if (separator >= 0)
+        throw new CliError("INVALID_INPUT", `--${name} does not take a value.`, 2);
       flags[name] = true;
       continue;
     }
-    const value = argv[++i];
-    if (value === undefined || value.startsWith("--"))
+    const value = separator >= 0 ? arg.slice(separator + 1) : argv[++i];
+    if (value === undefined || (separator < 0 && value.startsWith("--")))
       throw new CliError("INVALID_INPUT", `--${name} requires a value.`, 2);
-    flags[name] = value;
+    flags[name] = name === "id" ? [...(Array.isArray(flags.id) ? flags.id : []), value] : value;
   }
   return { words, flags };
 }
@@ -206,6 +233,33 @@ async function run(argv: string[]): Promise<unknown> {
   const help = helpFor(words, flags);
   if (help) return help;
   const command = words.slice(0, 2).join(" ");
+  if (words[0] === "message") {
+    if (words.length === 1 && Object.keys(flags).length === 0)
+      return new HelpResult(`${HELP.get("message")}\n`);
+    const value = await runMessageCommand(words, flags);
+    if (value === undefined) return new StreamedResult();
+    if (value.exitCode === 0) return value.result;
+    process.stdout.write(
+      `${JSON.stringify({
+        ok: false,
+        result: value.result,
+        error: {
+          code:
+            value.exitCode === 9
+              ? "AMBIGUOUS_MUTATION"
+              : value.exitCode === 4
+                ? "AUTHENTICATION"
+                : "PARTIAL_ACKNOWLEDGEMENT",
+          message:
+            "Some acknowledgements could not be confirmed. Inspect per-message outcomes before retrying.",
+        },
+      })}\n`,
+    );
+    process.exitCode = value.exitCode;
+    return new StreamedResult();
+  }
+  if (MESSAGE_FLAGS.some((flag) => flag in flags))
+    throw new CliError("INVALID_INPUT", "Message flags require a message command.", 2);
   const watchOptions = ["poll-interval-ms", "watch-timeout-seconds"];
   if (
     (flags.watch !== undefined || watchOptions.some((key) => key in flags)) &&

@@ -146,6 +146,17 @@ export async function request(
   body?: unknown,
   mutation = false,
 ): Promise<unknown> {
+  return (await requestWithStatus(ctx, method, path, body, mutation)).body;
+}
+
+/** Preserve status when an API distinguishes accepted mutations from silent no-ops. */
+export async function requestWithStatus(
+  ctx: Context,
+  method: string,
+  path: string,
+  body?: unknown,
+  mutation = false,
+): Promise<{ status: number; body: unknown }> {
   const cleanPath = path.replace(/^\/+/, "");
   const apiPath = cleanPath.startsWith("api/v0/") ? cleanPath : `api/v0/${cleanPath}`;
   let url: URL;
@@ -209,11 +220,11 @@ export async function request(
     if (!response.ok) {
       throw new CliError("REMOTE", `slskd returned HTTP ${response.status}.`, EXIT.REMOTE);
     }
-    if (response.status === 204) return null;
+    if (response.status === 204) return { status: response.status, body: null };
     const text = await response.text();
-    if (!text.trim()) return null;
+    if (!text.trim()) return { status: response.status, body: null };
     try {
-      return JSON.parse(text) as unknown;
+      return { status: response.status, body: JSON.parse(text) as unknown };
     } catch {
       if (mutation)
         throw new CliError(

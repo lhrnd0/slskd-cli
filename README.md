@@ -20,6 +20,56 @@ Run `pnpm format` to apply the repository's oxfmt rules. `pnpm lint:fix` applies
 
 Contributions use [Conventional Commits](CONTRIBUTING.md#commit-messages). The repository's Git hook validates commit messages locally.
 
+## Issue tracking with Beads
+
+Development tasks are tracked with [Beads](https://github.com/gastownhall/beads) using the `bd` command. Install a current version of Beads before setting up a development checkout; it is separate from the project's pnpm dependencies.
+
+### Bootstrap a fresh clone
+
+Run bootstrap before starting a coding agent or running other Beads commands:
+
+```sh
+git clone git@github.com:lhrnd0/slskd-cli.git
+cd slskd-cli
+
+chmod 700 .beads
+git config --local beads.role maintainer
+bd bootstrap --yes
+
+# Verify the restored database
+bd config get issue_prefix # should print slskd-cli
+bd stats
+bd ready
+```
+
+Use `contributor` instead of `maintainer` for a contributor checkout. The role is local to the checkout and does not override this repository's requirement for explicit authorization before an agent commits or pushes.
+
+A normal `git clone` does not fetch the issue database stored under `refs/dolt/data`. `bd bootstrap` retrieves the existing Dolt history and configures its remote using this repository's tracked `.beads/config.yaml`. Use bootstrap for this existing project; `bd init` is for initializing a new Beads project. Bootstrap restores the history already published to the remote, so issues created in another checkout must be published before they appear here. See the upstream [clone and sync setup guide](https://github.com/gastownhall/beads/blob/main/docs/getting-started/sync-setup.md).
+
+If bootstrap reports an existing database but `issue_prefix` is missing or expected issues are absent, stop and inspect the local database and remote history. Back up local data before attempting recovery; setting a prefix alone does not restore missing issues.
+
+### Daily workflow and synchronization
+
+```sh
+bd prime                           # Load workflow guidance and project memories
+bd ready                           # Find available work
+bd show '<issue-id>'                # Read an issue
+bd update '<issue-id>' --claim      # Claim it before starting
+bd create --title='Describe work' --description='Context and acceptance criteria' --type=task --priority=2
+bd close '<issue-id>' --reason='Describe what was completed'
+```
+
+Use Beads for task tracking and `bd remember` for persistent project knowledge, rather than separate Markdown task lists or memory files.
+
+Issue history and source code have separate synchronization commands:
+
+```sh
+bd dolt pull # Receive published issue updates
+bd dolt push # Publish local issue updates
+```
+
+`git pull` and `git push` synchronize source branches; they do not replace these Beads commands. Agents follow the repository's conservative policy: commit, push, and Dolt remote sync require explicit authorization.
+
 ## Run after building
 
 After `pnpm build`, run the generated entry point directly from the project directory:
@@ -50,7 +100,7 @@ node dist/cli.js transfer enqueue --help
 node dist/cli.js help search create
 ```
 
-Running the CLI, `search`, or `transfer` without further arguments also displays the relevant help. Help is plain text and does not read the Connection profile or contact slskd. Operational commands continue to emit exactly one JSON object.
+Running the CLI, `search`, `transfer`, or `message` without further arguments also displays the relevant help. Help is plain text and does not read the Connection profile or contact slskd. One-shot operational commands emit exactly one JSON object. Watch commands emit newline-delimited JSON.
 
 ## Connection profile
 
@@ -73,7 +123,99 @@ Set `SLSKD_CLI_CONFIG` to use a different profile file. `SLSKD_BASE_URL`, `SLSKD
 slskd check
 ```
 
-Operational commands emit one JSON object on stdout. They never prompt or print the API key. Success uses `{"ok":true,"result":...}`; failure uses `{"ok":false,"error":{"code":"...","message":"..."}}`. stderr is reserved for process level failures.
+One-shot operational commands emit one JSON object on stdout. They never prompt or print the API key. Success uses `{"ok":true,"result":...}`; failure uses `{"ok":false,"error":{"code":"...","message":"..."}}`. stderr is reserved for process level failures.
+
+## Private messages
+
+Use `message` commands to exchange Private messages with Soulseek usernames through your configured slskd account.
+Chat rooms and an interactive chat screen are outside this release.
+
+```sh
+slskd message conversations
+slskd message conversations --unacknowledged
+slskd message list 'peer'
+slskd message list 'peer' --unacknowledged
+slskd message send 'peer' --text 'Hello!' --yes
+printf '%s\n' 'Hello!' | slskd message send 'peer' --stdin --yes
+slskd message acknowledge 'peer' --id '<messageId>' --yes
+slskd message acknowledge 'peer' --id '<messageId1>' --id '<messageId2>' --yes
+slskd message acknowledge 'peer' --all --yes
+```
+
+`message conversations` includes inactive Conversations and reports their pending counts.
+`message list` returns a `conversation` summary, chronological `messages` in both directions, and `history` metadata.
+Each message has `messageId`, `serverId`, `username`, `timestamp`, `direction`, `text`, `isAcknowledged`, and `wasReplayed`.
+Unavailable replay information is `null`. Direction is `incoming` or `outgoing`.
+Use the opaque `messageId` for selection. Numeric `serverId` values can repeat, including zero for outgoing messages.
+Message identifiers remain stable across CLI invocations with unchanged slskd data.
+
+slskd 0.26.1 exposes the latest **100 messages per Conversation**, without pagination.
+Its pending-message filter runs after this limit. Older Unacknowledged messages can be absent from inspection.
+The CLI reports `history: {limit:100, complete:false, lossless:false, returnedBeforeFilter:...}` even for empty filtered history.
+The Conversation summary reports slskd's count. Its individual-Conversation count can itself be capped at 100.
+The CLI keeps no message archive or persistent consumer position.
+
+Inspection and watching never acknowledge messages.
+Acknowledgement is an explicit mutation and requires `--yes`.
+Selected references must resolve to incoming messages in the available history before any mutation starts.
+slskd acknowledges by username and numeric ID. Reused IDs cannot be acknowledged individually.
+The command verifies the selected message's state after acknowledgement.
+Already acknowledged selections return `outcome: "existing"` without another mutation.
+`--all` deliberately acknowledges the entire Conversation, including messages outside the visible window.
+It verifies that slskd reports no pending messages afterward.
+Concurrent arrivals or replay can prevent verification. The command then reports an uncertain outcome.
+Partial selection failures preserve per-message outcomes under `result.messages` and return nonzero status.
+Later selections have `outcome: "not_attempted"`. Earlier successful acknowledgements remain in effect.
+
+Sending preserves the exact text, including newlines from `--stdin`.
+Use either `--text` or `--stdin`; blank input is rejected. Each invocation sends one message.
+Use `--text=--literal` when the text starts with `--`.
+A successful send returns `{username, submitted:true, delivered:null, read:null}`.
+Submission does not prove delivery or remote reading.
+slskd's HTTP 200 response for skipped, potentially blacklisted recipients produces `MESSAGE_REJECTED`.
+Interrupted sends and server failures can produce `AMBIGUOUS_MUTATION`.
+The CLI never automatically retries a message or acknowledgement mutation.
+Inspect slskd before deciding whether to repeat an uncertain send; a duplicate message is possible.
+
+### Watch incoming messages
+
+```sh
+slskd message watch
+slskd message watch --username 'peer' --new-only --poll-interval-ms 1000 --timeout 60
+```
+
+Watching polls every **5000 ms** by default and runs until interrupted.
+`--poll-interval-ms` accepts integers **100..60000**.
+`--timeout` accepts integers **1..2147483** seconds and bounds the total message observation.
+The connection option `--timeout-ms` still controls each HTTP request separately.
+A username filter can wait for that username's first Conversation.
+Without a filter, the watcher discovers new Conversations between polls.
+
+The initial snapshot emits available Unacknowledged incoming messages.
+`--new-only` records the initial snapshot without emitting its messages.
+Later snapshots emit newly observed incoming messages, even when another client has already acknowledged them.
+The watcher suppresses duplicate message identities within that invocation.
+A new invocation can replay pending messages. Message replay does not imply that the remote user sent a second message.
+
+Each stdout line uses the usual JSON envelope:
+
+```json
+{"ok":true,"result":{"event":"started","username":null,"history":{"limit":100,"complete":false,"lossless":false}}}
+{"ok":true,"result":{"event":"message","message":{"messageId":"<messageId>","serverId":42,"username":"peer","timestamp":"2026-11-01T12:00:00Z","direction":"incoming","text":"Hello!","isAcknowledged":false,"wasReplayed":false}}}
+{"ok":true,"result":{"event":"ended","reason":"deadline","messageCount":1}}
+```
+
+`started` follows the initial successful snapshot. A duration limit can expire before that snapshot arrives.
+The duration limit emits `ended` with exit 0. It does not prove all messages were captured.
+A failed poll emits a typed error and exits without automatic retries.
+SIGINT and SIGTERM stop observation with exit **130** and **143**. A closed output pipe exits **0**.
+Output respects backpressure. Watching never sends replies or performs Message acknowledgement.
+Bursts beyond slskd's history window and interruptions can lose observable history.
+This watcher cannot promise lossless capture or exactly-once processing.
+
+The implementation follows slskd's [Conversation API](https://github.com/slskd/slskd/blob/0.26.1/src/slskd/Messaging/API/Controllers/ConversationsController.cs),
+[message service](https://github.com/slskd/slskd/blob/0.26.1/src/slskd/Messaging/ConversationService.cs),
+and [polling chat UI](https://github.com/slskd/slskd/blob/0.26.1/src/web/src/components/Chat/Chat.jsx).
 
 ## List searches
 
@@ -131,7 +273,7 @@ The directory request uses the configured per-request timeout. Unavailable peers
 
 ## Watch search candidates
 
-`search create` starts a Search and returns its canonical `searchId` immediately. To observe Candidates as slskd receives them, pass that ID to `search candidates --watch`:
+`search create` starts a Search and returns its canonical `searchId` immediately. To monitor Search progress and receive Candidates when slskd exposes them, pass that ID to `search candidates --watch`:
 
 ```sh
 slskd search create --query 'artist album' --lifetime-seconds 60
@@ -144,11 +286,18 @@ Watch mode writes one newline-delimited JSON record at a time to stdout. Success
 
 ```json
 {"ok":true,"result":{"event":"started","searchId":"<searchId>"}}
+{"ok":true,"result":{"event":"progress","searchId":"<searchId>","state":"InProgress","responseCount":12,"fileCount":48,"lockedFileCount":3}}
 {"ok":true,"result":{"event":"candidate","searchId":"<searchId>","candidate":{"candidateId":"<candidateId>","searchId":"<searchId>","username":"peer","path":"Artist/Album/01 - Track.flac","filename":"01 - Track.flac","extension":".flac","size":12345678,"queueLength":0,"hasFreeUploadSlot":true,"uploadSpeed":1200000,"bitRate":900,"length":240,"sampleRate":44100,"bitDepth":16,"isVariableBitRate":false,"isLocked":false}}}
 {"ok":true,"result":{"event":"ended","searchId":"<searchId>","reason":"completed","candidateCount":1}}
 ```
 
-The event types are `started`, `candidate`, and `ended`. Each candidate record contains the full normalized Candidate. `candidateCount` counts distinct Candidate identifiers emitted during this invocation. Repeated or reordered slskd snapshots do not emit the same Candidate twice, and metadata changes for an already emitted Candidate do not produce update records. A new watch has no saved cursor: it replays Candidates currently available from slskd and deduplicates only within that invocation.
+The event types are `started`, `progress`, `candidate`, and `ended`. A `progress` record is emitted on every successful Search-state poll, including the initial and completed snapshots, even if counts have not changed. It contains the daemon's raw `state`, `responseCount` (peer responses), `fileCount`, and `lockedFileCount`; unavailable counts are `null`. These counts describe the daemon's Search, while `candidateCount` describes distinct Candidates emitted by this watch invocation.
+
+slskd 0.26.1 accumulates file results in memory and publishes them through REST only when the Search finalizes. Counts can rise while the Candidate list remains empty. Watch mode therefore provides live progress followed by the available Candidates, rather than promising incremental file results. See the upstream [Search service](https://github.com/slskd/slskd/blob/0.26.1/src/slskd/Search/SearchService.cs).
+
+Agents should keep reading until `ended` with `reason: "completed"`, then evaluate the collected Candidates. Neither unchanged counts, an empty Candidate list, nor a `progress` record with a completed state is the final result signal. `ended` with `reason: "deadline"` means observation stopped early: resume watching the same `searchId` to wait again. Exit 0 alone does not prove Search completion. An `ok: false` record is a failure and must not be treated as a final result set. Retain Candidates across deadline resumptions by `candidateId`, because a new watch replays available Candidates.
+
+Each candidate record contains the full normalized Candidate. `candidateCount` counts distinct Candidate identifiers emitted during this invocation. Repeated or reordered slskd snapshots do not emit the same Candidate twice, and metadata changes for an already emitted Candidate do not produce update records. A new watch has no saved cursor: it replays Candidates currently available from slskd and deduplicates only within that invocation.
 
 `--poll-interval-ms` accepts **100–60,000** and defaults to **1,000**. `--watch-timeout-seconds` accepts **1–3,600** and defaults to **300**. The watch timeout bounds the complete observation, including requests. When slskd reports the Search's `Completed` state, the CLI fetches one final response snapshot, emits any new Candidates, then ends with `reason: "completed"`. slskd 0.26.1 serializes Search states as enum names; `Completed` is the collection-terminal flag and may appear with a reason such as `TimedOut`, `Cancelled`, or `Errored`. The upstream [`Search` model](https://github.com/slskd/slskd/blob/0.26.1/src/slskd/Search/Types/Search.cs), [Search API controller](https://github.com/slskd/slskd/blob/0.26.1/src/slskd/Search/API/Controllers/SearchesController.cs), and [`SearchStates` enum](https://github.com/jpdillingham/Soulseek.NET/blob/10.0.2/src/SearchStates.cs) define this contract. An Expired or missing Search is an error, not normal collection completion.
 
@@ -175,18 +324,18 @@ Every mutation needs its own literal `--yes`. `cancel` leaves completed or alrea
 
 ## Exit codes
 
-| Exit | Meaning                                                             | Error codes                                                                                                                      |
-| ---: | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-|    0 | Success                                                             | —                                                                                                                                |
-|    2 | Invalid input or acknowledgement                                    | `INVALID_INPUT`, `INVALID_CONFIG`, `INVALID_CANDIDATE`, `ACKNOWLEDGEMENT_REQUIRED`                                               |
-|    3 | Missing Connection values                                           | `MISSING_CONFIGURATION`                                                                                                          |
-|    4 | Authentication or key permissions                                   | `AUTHENTICATION`                                                                                                                 |
-|    5 | Unsupported or unreadable slskd version                             | `INCOMPATIBLE`                                                                                                                   |
-|    6 | Connection failure                                                  | `CONNECTION`                                                                                                                     |
-|    7 | Remote error, missing/expired Search or Candidate, missing Transfer | `REMOTE`, `MISSING_SEARCH`, `EXPIRED_SEARCH`, `MISSING_CANDIDATE`, `TRANSFER_NOT_FOUND`, `UNAVAILABLE_FOLDER`, `PARTIAL_ENQUEUE` |
-|    8 | Read request timeout                                                | `TIMEOUT`                                                                                                                        |
-|    9 | Unknown mutation outcome                                            | `AMBIGUOUS_MUTATION`                                                                                                             |
-|  130 | SIGINT during watch observation                                     | —                                                                                                                                |
-|  143 | SIGTERM during watch observation                                    | —                                                                                                                                |
+| Exit | Meaning                                                                | Error codes                                                                                                                                                                                             |
+| ---: | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|    0 | Success                                                                | —                                                                                                                                                                                                       |
+|    2 | Invalid input or acknowledgement                                       | `INVALID_INPUT`, `INVALID_CONFIG`, `INVALID_CANDIDATE`, `ACKNOWLEDGEMENT_REQUIRED`, `INPUT`                                                                                                             |
+|    3 | Missing Connection values                                              | `MISSING_CONFIGURATION`                                                                                                                                                                                 |
+|    4 | Authentication or key permissions                                      | `AUTHENTICATION`                                                                                                                                                                                        |
+|    5 | Unsupported or unreadable slskd version                                | `INCOMPATIBLE`                                                                                                                                                                                          |
+|    6 | Connection failure                                                     | `CONNECTION`                                                                                                                                                                                            |
+|    7 | Remote error, unavailable resource, rejected message, partial mutation | `REMOTE`, `MISSING_SEARCH`, `EXPIRED_SEARCH`, `MISSING_CANDIDATE`, `TRANSFER_NOT_FOUND`, `UNAVAILABLE_FOLDER`, `PARTIAL_ENQUEUE`, `MISSING_CONVERSATION`, `MESSAGE_REJECTED`, `PARTIAL_ACKNOWLEDGEMENT` |
+|    8 | Read request timeout                                                   | `TIMEOUT`                                                                                                                                                                                               |
+|    9 | Unknown mutation outcome                                               | `AMBIGUOUS_MUTATION`                                                                                                                                                                                    |
+|  130 | SIGINT during watch observation                                        | —                                                                                                                                                                                                       |
+|  143 | SIGTERM during watch observation                                       | —                                                                                                                                                                                                       |
 
 An unknown mutation outcome uses exit 9 and `AMBIGUOUS_MUTATION`, including a timeout after sending a mutation. The CLI does not retry state-changing requests automatically.
