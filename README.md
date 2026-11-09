@@ -114,14 +114,18 @@ node dist/cli.js check
 node dist/cli.js search create --query 'artist album'
 ```
 
-`dist` is a directory, so Node must be given the complete `dist/cli.js` path. To make the `slskd` command available globally from a local checkout, link the package:
+`dist` is a directory, so Node must be given the complete `dist/cli.js` path. To make the `slskd` command available globally from a local checkout, run these commands from the repository root:
 
 ```sh
-pnpm link --global
+pnpm install --frozen-lockfile
+pnpm build
+pnpm add -g .
 slskd --help
 ```
 
-The npm package exposes `slskd` from `dist/cli.js`. After preview publication, install it with `pnpm add --global slskd-cli@next --registry=https://registry.npmjs.org/`. During development, either use `node dist/cli.js` in place of `slskd` below or create the global link shown above.
+`pnpm add -g .` registers this checkout's `slskd` command for use from any directory. Rebuild with `pnpm build` after changing the source. With pnpm 12, use `pnpm add -g .` for this workflow; `pnpm link --global` is no longer supported.
+
+The npm package exposes `slskd` from `dist/cli.js`. After preview publication, install it with `pnpm add --global slskd-cli@next --registry=https://registry.npmjs.org/`. During development, either use `node dist/cli.js` in place of `slskd` below or register the global command as shown above.
 
 ## Help
 
