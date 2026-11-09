@@ -80,15 +80,15 @@ _Add a brief overview of your project architecture_
 
 _Add your project-specific conventions here_
 
-## Agent skills
+## Agents workflow
 
 ### Issue tracker
 
-Issues are tracked locally with Beads (`bd`) in its Dolt-backed database. See `docs/agents/issue-tracker.md`.
+Use Beads (`bd`) for issues and specs. Read `docs/agents/issue-tracker.md` before creating, claiming, or closing work.
 
 ### Triage labels
 
-The five canonical triage roles use their default label strings. See `docs/agents/triage-labels.md`.
+Use the five canonical triage labels. Read `docs/agents/triage-labels.md` when assigning triage labels.
 
 ### Domain docs
 

@@ -139,15 +139,15 @@ pnpm test
 
 When authorized to create a commit, follow Conventional Commits using `<type>[optional scope][optional !]: <description>`. Allowed types are `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`, `revert`, `style`, and `test`. See `CONTRIBUTING.md` for the complete policy and examples.
 
-## Agent skills
+## Agents workflow
 
 ### Issue tracker
 
-Issues are tracked locally with Beads (`bd`) in its Dolt-backed database. See `docs/agents/issue-tracker.md`.
+Use Beads (`bd`) for issues and specs. Read `docs/agents/issue-tracker.md` before creating, claiming, or closing work.
 
 ### Triage labels
 
-The five canonical triage roles use their default label strings. See `docs/agents/triage-labels.md`.
+Use the five canonical triage labels. Read `docs/agents/triage-labels.md` when assigning triage labels.
 
 ### Domain docs
 
