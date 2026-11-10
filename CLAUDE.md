@@ -30,7 +30,7 @@ _Add your project-specific conventions here_
 
 ### Domain docs
 
-This repository uses a single-context domain-doc layout. See `docs/agents/domain.md`.
+Before exploring behavior, read [domain guidance](CONTRIBUTING.md#domain-documentation).
 
 <!-- context7 -->
 
