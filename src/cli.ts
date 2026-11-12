@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { CliError, compatible, resolveContext, requireYes } from "./core.js";
+import { CliError, check, compatible, resolveContext, requireYes } from "./core.js";
 import {
   searchCreate,
   searchCandidates,
@@ -310,6 +310,7 @@ async function run(argv: string[]): Promise<unknown> {
   ) {
     throw new CliError("INVALID_INPUT", "Unknown command.", 2);
   }
+  if (words[0] === "check") return check(flags);
   const ctx = resolveContext(flags);
   if (command === "search candidates" && flags.watch === true) {
     requireWords(words, 3);
@@ -324,11 +325,7 @@ async function run(argv: string[]): Promise<unknown> {
     await runSearchWatch(ctx, words[2]!, watchOptions);
     return new StreamedResult();
   }
-  const verified = await compatible(ctx);
-  if (words[0] === "check") {
-    requireWords(words, 1);
-    return verified;
-  }
+  await compatible(ctx);
   if (command === "search list") {
     requireWords(words, 2);
     return { searches: await searchList(ctx) };

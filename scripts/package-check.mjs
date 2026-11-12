@@ -62,7 +62,13 @@ try {
   assert.equal(manifest.version, archive.version);
   assert.equal(manifest.license, "MIT");
   const dependencyNames = await readdir(join(installed, "node_modules"));
-  assert.deepEqual(dependencyNames, ["smol-toml"]);
+  assert.deepEqual(dependencyNames.sort(), ["effect", "smol-toml"]);
+  assert.equal(manifest.dependencies.effect, "4.1.4");
+  const effectManifest = JSON.parse(
+    await readFile(join(installed, "node_modules", "effect", "package.json"), "utf8"),
+  );
+  assert.equal(effectManifest.version, "4.1.4");
+  assert.deepEqual(effectManifest.dependencies ?? {}, {});
   const executable = join(prefix, "bin", "slskd");
   const env = {
     ...process.env,

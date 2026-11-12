@@ -2,6 +2,8 @@
 
 The CLI provides a deterministic interface to one trusted slskd instance.
 Each process resolves a Connection profile, checks compatibility, and performs the requested operation.
+The `check` command uses Effect services for its Connection profile and authenticated requests.
+Other commands temporarily use adapters over the same request service.
 slskd owns Search, Transfer, and Private message state.
 
 ## Modules
@@ -32,7 +34,8 @@ Paths below are relative to the repository root.
 
 See the [Workflow state decision](../adr/0001-slskd-owns-workflow-state.md),
 [distribution decision](../adr/0002-node-typescript-npm-distribution.md),
-and [message state decision](../adr/0003-slskd-owns-private-message-state.md).
+[message state decision](../adr/0003-slskd-owns-private-message-state.md),
+and [Effect adoption decision](../adr/0004-effect-runtime-and-services.md).
 
 ## Public interface and tests
 
