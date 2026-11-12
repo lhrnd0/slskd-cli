@@ -166,6 +166,9 @@ importers:
 
   .:
     dependencies:
+      effect:
+        specifier: 4.1.4
+        version: 4.1.4
       smol-toml:
         specifier: ^1.3.1
         version: 1.9.1
@@ -707,6 +710,9 @@ packages:
       typescript:
         optional: true
 
+  effect@4.1.4:
+    resolution: {integrity: sha512-Tgrv/9FN+TZYyOn8XSli+fVqAfwDrDAkiX5Uu9vztINb675VTQdhD0gWI5Kzvhlh9QqzjZvw72iugqw5pwoghQ==}
+
   emoji-regex@10.6.0:
     resolution: {integrity: sha512-toUI84YS5YmxW219erniWD0CIVOo46xGKColeNQRgOzDorgBi1v4D71/OFzgD9GO2UGKIv1C3Sp8DAn0+j5w7A==}
 
@@ -1241,6 +1247,8 @@ snapshots:
       parse-json: 5.2.0
     optionalDependencies:
       typescript: 7.0.2
+
+  effect@4.1.4: {}
 
   emoji-regex@10.6.0: {}
 
