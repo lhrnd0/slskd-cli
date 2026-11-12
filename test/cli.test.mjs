@@ -493,14 +493,14 @@ for (const emptyBatch of [false, true]) {
 }
 
 test("a timed-out enqueue is an ambiguous mutation and is not retried", async () => {
-  const host = await fixture({ delayBatch: 200 });
+  const host = await fixture({ delayBatch: 3000 });
   const env = { SLSKD_BASE_URL: host.url, SLSKD_API_KEY: "secret" };
   try {
     const searchId = (await cli(["search", "create", "--query", "song"], env)).json.result.searchId;
     const candidateId = (await cli(["search", "candidates", searchId], env)).json.result
       .candidates[0].candidateId;
     const timedOut = await cli(
-      ["transfer", "enqueue", searchId, candidateId, "--yes", "--timeout-ms", "50"],
+      ["transfer", "enqueue", searchId, candidateId, "--yes", "--timeout-ms", "1000"],
       env,
     );
     assert.equal(timedOut.code, 9);

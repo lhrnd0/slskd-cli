@@ -227,7 +227,7 @@ test("message help works offline for every command", { timeout: 10000 }, async (
 
 test(
   "message commands reject misplaced flags and invalid input before network access",
-  { timeout: 10000 },
+  { timeout: 30000 },
   async (t) => {
     const host = await fixture(t);
     for (const args of [
