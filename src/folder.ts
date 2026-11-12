@@ -1,6 +1,16 @@
 import { createHash } from "node:crypto";
-import { CliError, type Context, request, requireYes } from "./core.js";
-import { resolveCandidate } from "./search.js";
+import * as Effect from "effect/Effect";
+import {
+  CliError,
+  CoreFailure,
+  type RequestFailure,
+  type SlskdRequest,
+  failure,
+  requestEffect,
+  validateEffect as validate,
+  requireYes,
+} from "./core.js";
+import { resolveCandidateEffect, type Candidate } from "./search.js";
 
 const REMOTE_EXIT = 7;
 type RecordValue = Record<string, unknown>;
@@ -83,17 +93,25 @@ function fileId(username: string, directory: string, path: string, size: number 
     .digest("base64url")}`;
 }
 
-async function listing(ctx: Context, username: string, directory: string): Promise<FolderListing> {
-  let value: unknown;
-  try {
-    value = await request(ctx, "POST", `users/${encodeURIComponent(username)}/directory`, {
+function listingEffect(
+  username: string,
+  directory: string,
+): Effect.Effect<FolderListing, RequestFailure, SlskdRequest> {
+  return Effect.gen(function* () {
+    const value = yield* requestEffect("POST", `users/${encodeURIComponent(username)}/directory`, {
       directory,
-    });
-  } catch (error) {
-    if (error instanceof CliError && error.code === "REMOTE" && error.message.includes("HTTP 404"))
-      throw new CliError("UNAVAILABLE_FOLDER", "The peer folder is unavailable.", REMOTE_EXIT);
-    throw error;
-  }
+    }).pipe(
+      Effect.mapError((error) =>
+        error instanceof CoreFailure && error.status === 404
+          ? failure("UNAVAILABLE_FOLDER", "The peer folder is unavailable.", REMOTE_EXIT)
+          : error,
+      ),
+    );
+    return yield* validate(() => normalizeListing(username, directory, value));
+  });
+}
+
+function normalizeListing(username: string, directory: string, value: unknown): FolderListing {
   if (!Array.isArray(value)) throw remote("slskd returned an incomplete folder listing.");
   // The endpoint returns directories; only the requested immediate directory is in scope.
   const wanted = directory;
@@ -156,14 +174,7 @@ async function listing(ctx: Context, username: string, directory: string): Promi
   return { folderRef: folderRef(username, wanted), username, directory: wanted, files };
 }
 
-export async function folderDiscover(
-  ctx: Context,
-  searchId: string,
-  candidateId: string,
-  yes: unknown,
-): Promise<FolderListing> {
-  requireYes(yes);
-  const candidate = await resolveCandidate(ctx, searchId, candidateId);
+function candidateDirectory(candidate: Candidate): { username: string; directory: string } {
   if (
     !candidate.username?.trim() ||
     hasControlCharacters(candidate.username) ||
@@ -177,15 +188,29 @@ export async function folderDiscover(
   const directory = candidate.path.slice(0, i);
   if (!directory.trim() || /(?:^|[\\/])\.\.?(?:[\\/]|$)/.test(directory))
     throw fail("Candidate does not identify a usable remote directory.");
-  return listing(ctx, candidate.username, directory);
+  return { username: candidate.username, directory };
 }
 
-export async function folderShow(
-  ctx: Context,
+export function folderDiscoverEffect(
+  searchId: string,
+  candidateId: string,
+  yes: unknown,
+): Effect.Effect<FolderListing, RequestFailure, SlskdRequest> {
+  return Effect.gen(function* () {
+    yield* validate(() => requireYes(yes));
+    const candidate = yield* resolveCandidateEffect(searchId, candidateId);
+    const { username, directory } = yield* validate(() => candidateDirectory(candidate));
+    return yield* listingEffect(username, directory);
+  });
+}
+
+export function folderShowEffect(
   folderReference: string,
   yes: unknown,
-): Promise<FolderListing> {
-  requireYes(yes);
-  const [username, directory] = decodeFolderRef(folderReference);
-  return listing(ctx, username, directory);
+): Effect.Effect<FolderListing, RequestFailure, SlskdRequest> {
+  return Effect.gen(function* () {
+    yield* validate(() => requireYes(yes));
+    const [username, directory] = yield* validate(() => decodeFolderRef(folderReference));
+    return yield* listingEffect(username, directory);
+  });
 }

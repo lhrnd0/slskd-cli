@@ -62,7 +62,46 @@ try {
   assert.equal(manifest.version, archive.version);
   assert.equal(manifest.license, "MIT");
   const dependencyNames = await readdir(join(installed, "node_modules"));
-  assert.deepEqual(dependencyNames, ["smol-toml"]);
+  assert.deepEqual(dependencyNames.sort(), [
+    "@effect",
+    "@redis",
+    "@types",
+    "effect",
+    "redis",
+    "smol-toml",
+    "undici",
+    "undici-types",
+    "ws",
+  ]);
+  assert.deepEqual((await readdir(join(installed, "node_modules", "@effect"))).sort(), [
+    "platform-node",
+    "platform-node-shared",
+  ]);
+  assert.deepEqual((await readdir(join(installed, "node_modules", "@redis"))).sort(), [
+    "bloom",
+    "client",
+    "json",
+    "search",
+    "time-series",
+  ]);
+  assert.deepEqual((await readdir(join(installed, "node_modules", "@types"))).sort(), [
+    "node",
+    "ws",
+  ]);
+  assert.equal(manifest.dependencies["@effect/platform-node"], "4.1.4");
+  assert.equal(manifest.dependencies.effect, "4.1.4");
+  const platformManifest = JSON.parse(
+    await readFile(
+      join(installed, "node_modules", "@effect", "platform-node", "package.json"),
+      "utf8",
+    ),
+  );
+  assert.equal(platformManifest.version, "4.1.4");
+  const effectManifest = JSON.parse(
+    await readFile(join(installed, "node_modules", "effect", "package.json"), "utf8"),
+  );
+  assert.equal(effectManifest.version, "4.1.4");
+  assert.deepEqual(effectManifest.dependencies ?? {}, {});
   const executable = join(prefix, "bin", "slskd");
   const env = {
     ...process.env,

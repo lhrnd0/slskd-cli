@@ -58,3 +58,7 @@ slskd help message watch
 ```
 
 Running `slskd`, `slskd search`, `slskd transfer`, or `slskd message` without further arguments also displays help.
+
+Help comes from the Effect command tree.
+Use `slskd <command> --help` or `slskd help <command>` to inspect commands and options offline.
+Help wording and layout can change without changing operational JSON.
