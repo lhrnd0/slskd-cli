@@ -16,9 +16,14 @@ import {
   resolveSearchWatchOptions,
 } from "./search.js";
 import { folderDiscoverEffect, folderShowEffect } from "./folder.js";
-import { folderEnqueue } from "./folder-enqueue.js";
-import { transferEnqueue } from "./enqueue.js";
-import { transferCancel, transferClear, transferDelete, transferInspect } from "./transfer.js";
+import { folderEnqueueEffect } from "./folder-enqueue.js";
+import { transferEnqueueEffect } from "./enqueue.js";
+import {
+  transferCancelEffect,
+  transferClearEffect,
+  transferDeleteEffect,
+  transferInspectEffect,
+} from "./transfer.js";
 import { runSearchWatch } from "./watch-cli.js";
 import { MESSAGE_FLAGS, MESSAGE_HELP, runMessageCommand } from "./message-cli.js";
 
@@ -333,7 +338,7 @@ async function run(argv: string[]): Promise<unknown> {
     await runSearchWatch(ctx, words[2]!, watchOptions);
     return new StreamedResult();
   }
-  if (words[0] === "search") {
+  if (words[0] === "search" || words[0] === "transfer") {
     await runOperation(ctx, compatibleEffect);
   } else {
     await compatible(ctx);
@@ -367,12 +372,9 @@ async function run(argv: string[]): Promise<unknown> {
   if (command === "transfer enqueue" && words[2]?.startsWith("folder_")) {
     if (words.some((word) => !word))
       throw new CliError("INVALID_INPUT", "Invalid command arguments.", 2);
-    const { exitCode, ...result } = await folderEnqueue(
+    const { exitCode, ...result } = await runOperation(
       ctx,
-      words[2]!,
-      words.slice(3),
-      flags.all === true,
-      flags.yes,
+      folderEnqueueEffect(words[2]!, words.slice(3), flags.all === true, flags.yes),
     );
     if (exitCode !== 0) {
       process.stdout.write(
@@ -402,16 +404,18 @@ async function run(argv: string[]): Promise<unknown> {
   }
   if (command === "transfer enqueue") {
     requireWords(words, 4);
-    return transferEnqueue(ctx, words[2]!, words[3]!, flags.yes);
+    return runOperation(ctx, transferEnqueueEffect(words[2]!, words[3]!, flags.yes));
   }
   if (command === "transfer clear") {
     requireWords(words, 2);
-    return transferClear(ctx, flags.yes);
+    return runOperation(ctx, transferClearEffect(flags.yes));
   }
   requireWords(words, 4);
-  if (command === "transfer show") return transferInspect(ctx, words[2]!, words[3]!);
-  if (command === "transfer cancel") return transferCancel(ctx, words[2]!, words[3]!, flags.yes);
-  return transferDelete(ctx, words[2]!, words[3]!, flags.yes);
+  if (command === "transfer show")
+    return runOperation(ctx, transferInspectEffect(words[2]!, words[3]!));
+  if (command === "transfer cancel")
+    return runOperation(ctx, transferCancelEffect(words[2]!, words[3]!, flags.yes));
+  return runOperation(ctx, transferDeleteEffect(words[2]!, words[3]!, flags.yes));
 }
 
 try {

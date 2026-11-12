@@ -1,4 +1,13 @@
-import { CliError, type Context, request, requireYes } from "./core.js";
+import * as Effect from "effect/Effect";
+import {
+  CliError,
+  CoreFailure,
+  type RequestFailure,
+  type SlskdRequest,
+  failure,
+  requestEffect,
+  requireYes,
+} from "./core.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -95,101 +104,130 @@ function normalized(raw: unknown): TransferResult {
   };
 }
 
-function isNotFound(error: unknown): boolean {
-  return error instanceof CliError && error.code === "REMOTE" && error.message.includes("HTTP 404");
+function missingTransfer(): CoreFailure {
+  return failure("TRANSFER_NOT_FOUND", "The specified Transfer was not found.", 7);
 }
 
-function missingTransfer(): CliError {
-  return new CliError("TRANSFER_NOT_FOUND", "The specified Transfer was not found.", 7);
+function mapMissingTransfer(error: RequestFailure): RequestFailure {
+  return error instanceof CoreFailure && error.status === 404 ? missingTransfer() : error;
 }
 
-async function getRaw(ctx: Context, username: string, id: string): Promise<unknown> {
-  try {
-    const transfer = await request(ctx, "GET", transferPath(username, id));
-    if (object(transfer)?.username !== username) throw missingTransfer();
+function validate<A>(evaluate: () => A): Effect.Effect<A, CoreFailure> {
+  return Effect.try({
+    try: evaluate,
+    catch: (error) =>
+      error instanceof CliError
+        ? failure(error.code, error.message, error.exitCode)
+        : failure("REMOTE", "Unexpected CLI failure.", 7),
+  });
+}
+
+function getRawEffect(
+  username: string,
+  id: string,
+): Effect.Effect<unknown, RequestFailure, SlskdRequest> {
+  return Effect.gen(function* () {
+    const path = yield* validate(() => transferPath(username, id));
+    const transfer = yield* requestEffect("GET", path).pipe(Effect.mapError(mapMissingTransfer));
+    if (object(transfer)?.username !== username) return yield* Effect.fail(missingTransfer());
     return transfer;
-  } catch (error) {
-    if (isNotFound(error)) throw missingTransfer();
-    throw error;
-  }
+  });
 }
 
 /** Get all downloads, flattened from slskd's username/directory response groups. */
-export async function transferList(ctx: Context): Promise<TransferResult[]> {
-  const raw = await request(ctx, "GET", "/transfers/downloads");
-  if (!Array.isArray(raw)) return [];
-  const results: TransferResult[] = [];
-  for (const user of raw) {
-    const directories = object(user)?.directories;
-    if (!Array.isArray(directories)) continue;
-    for (const directory of directories) {
-      const files = object(directory)?.files;
-      if (!Array.isArray(files)) continue;
-      for (const file of files) results.push(normalized(file));
+export const transferListEffect: Effect.Effect<TransferResult[], RequestFailure, SlskdRequest> =
+  Effect.map(requestEffect("GET", "/transfers/downloads"), (raw) => {
+    if (!Array.isArray(raw)) return [];
+    const results: TransferResult[] = [];
+    for (const user of raw) {
+      const directories = object(user)?.directories;
+      if (!Array.isArray(directories)) continue;
+      for (const directory of directories) {
+        const files = object(directory)?.files;
+        if (!Array.isArray(files)) continue;
+        for (const file of files) results.push(normalized(file));
+      }
     }
-  }
-  return results.sort((a, b) => a.username.localeCompare(b.username) || a.id.localeCompare(b.id));
-}
+    return results.sort((a, b) => a.username.localeCompare(b.username) || a.id.localeCompare(b.id));
+  });
 
-export async function transferInspect(
-  ctx: Context,
+export function transferInspectEffect(
   username: string,
   id: string,
-): Promise<TransferResult> {
-  return normalized(await getRaw(ctx, username, id));
+): Effect.Effect<TransferResult, RequestFailure, SlskdRequest> {
+  return Effect.map(getRawEffect(username, id), normalized);
 }
 
-export async function transferCancel(
-  ctx: Context,
+export function transferCancelEffect(
   username: string,
   id: string,
   yes: unknown,
-): Promise<{ action: "cancel"; changed: boolean; transfer: TransferResult }> {
-  requireYes(yes);
-  const current = await transferInspect(ctx, username, id);
-  if (current.terminal) return { action: "cancel", changed: false, transfer: current };
+): Effect.Effect<
+  { action: "cancel"; changed: boolean; transfer: TransferResult },
+  RequestFailure,
+  SlskdRequest
+> {
+  return Effect.gen(function* () {
+    yield* validate(() => requireYes(yes));
+    const current = yield* transferInspectEffect(username, id);
+    if (current.terminal) return { action: "cancel" as const, changed: false, transfer: current };
 
-  try {
-    await request(ctx, "DELETE", `${transferPath(username, id)}?remove=false`, undefined, true);
-  } catch (error) {
-    if (isNotFound(error)) throw missingTransfer();
-    throw error;
-  }
-
-  try {
-    return { action: "cancel", changed: true, transfer: await transferInspect(ctx, username, id) };
-  } catch {
-    throw new CliError(
-      "AMBIGUOUS_MUTATION",
-      "The cancellation request succeeded, but its resulting state could not be read. Query slskd before retrying.",
-      9,
+    yield* requestEffect(
+      "DELETE",
+      `${transferPath(username, id)}?remove=false`,
+      undefined,
+      true,
+    ).pipe(Effect.mapError(mapMissingTransfer));
+    const transfer = yield* transferInspectEffect(username, id).pipe(
+      Effect.mapError(() =>
+        failure(
+          "AMBIGUOUS_MUTATION",
+          "The cancellation request succeeded, but its resulting state could not be read. Query slskd before retrying.",
+          9,
+        ),
+      ),
     );
-  }
+    return { action: "cancel" as const, changed: true, transfer };
+  });
 }
 
-export async function transferClear(
-  ctx: Context,
+export function transferClearEffect(
   yes: unknown,
-): Promise<{ action: "clear"; scope: "completed-downloads"; changed: true }> {
-  requireYes(yes);
-  await request(ctx, "DELETE", "/transfers/downloads/all/completed", undefined, true);
-  return { action: "clear", scope: "completed-downloads", changed: true };
+): Effect.Effect<
+  { action: "clear"; scope: "completed-downloads"; changed: true },
+  RequestFailure,
+  SlskdRequest
+> {
+  return Effect.gen(function* () {
+    yield* validate(() => requireYes(yes));
+    yield* requestEffect("DELETE", "/transfers/downloads/all/completed", undefined, true);
+    return {
+      action: "clear" as const,
+      scope: "completed-downloads" as const,
+      changed: true as const,
+    };
+  });
 }
 
-export async function transferDelete(
-  ctx: Context,
+export function transferDeleteEffect(
   username: string,
   id: string,
   yes: unknown,
-): Promise<{ action: "delete"; id: string; username: string; removed: true }> {
-  requireYes(yes);
-  // Confirm existence first so the API's idempotent remove semantics still report missing records.
-  await getRaw(ctx, username, id);
-  try {
-    await request(ctx, "DELETE", `${transferPath(username, id)}?remove=true`, undefined, true);
-  } catch (error) {
-    if (isNotFound(error)) throw missingTransfer();
-    throw error;
-  }
-  return { action: "delete", id, username, removed: true };
+): Effect.Effect<
+  { action: "delete"; id: string; username: string; removed: true },
+  RequestFailure,
+  SlskdRequest
+> {
+  return Effect.gen(function* () {
+    yield* validate(() => requireYes(yes));
+    // Confirm existence so idempotent API removal still reports missing records.
+    yield* getRawEffect(username, id);
+    yield* requestEffect(
+      "DELETE",
+      `${transferPath(username, id)}?remove=true`,
+      undefined,
+      true,
+    ).pipe(Effect.mapError(mapMissingTransfer));
+    return { action: "delete" as const, id, username, removed: true as const };
+  });
 }
