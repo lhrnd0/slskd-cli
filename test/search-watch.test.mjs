@@ -894,6 +894,36 @@ test(
 );
 
 test(
+  "watch finishes a blocked progress write before requesting Search responses",
+  { timeout: 20_000 },
+  async (t) => {
+    const host = await watchFixture({ searchState: `InProgress${" ".repeat(1_000_000)}` });
+    const child = streamingCli(["search", "candidates", SEARCH_ID, "--watch"], {
+      SLSKD_BASE_URL: host.url,
+      SLSKD_API_KEY: "secret",
+    });
+    child.child.stdout.pause();
+    t.after(async () => {
+      await child.stop();
+      await host.close();
+    });
+
+    await host.waitForRequest("GET", `/api/v0/searches/${SEARCH_ID}`);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.equal(
+      host.requests.filter(({ path }) => path.endsWith("/responses")).length,
+      0,
+      "progress output must finish before fetching Candidates",
+    );
+    child.closeStdout();
+    const exit = await child.closed;
+    assert.equal(exit.code, 0, exit.stderr);
+    assert.equal(exit.stderr, "");
+    assert.ok(host.requests.every(({ method }) => method === "GET"));
+  },
+);
+
+test(
   "watch reports live counts and idle heartbeats before buffered final Candidates",
   { timeout: 20_000 },
   async (t) => {

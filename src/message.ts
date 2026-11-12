@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { setTimeout as delay } from "node:timers/promises";
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
+import * as Stream from "effect/Stream";
 import {
   CliError,
   CoreFailure,
@@ -13,6 +14,7 @@ import {
   requireYes,
   runOperation,
 } from "./core.js";
+import { watchDeadline } from "./watch.js";
 
 export type PrivateMessage = {
   messageId: string;
@@ -391,7 +393,7 @@ export function messageAcknowledgeEffect(
   });
 }
 
-/** Temporary adapters for command parsing and Private message watches. */
+/** Temporary Promise adapters retained until the final migration stage. */
 export function messageConversations(ctx: Context, unacknowledged = false) {
   return runOperation(ctx, messageConversationsEffect(unacknowledged));
 }
@@ -436,65 +438,86 @@ export function resolveMessageWatchOptions(options: MessageWatchOptions = {}) {
   return { ...options, pollIntervalMs };
 }
 
+export type MessageWatchEvent =
+  | { event: "started"; username: string | null; history: typeof HISTORY }
+  | { event: "message"; message: PrivateMessage }
+  | { event: "ended"; reason: "deadline"; messageCount: number };
+
 /** Poll all available history, not just pending messages: another client may ACK between polls. */
-export async function* messageWatch(ctx: Context, options: MessageWatchOptions = {}) {
-  const settings = resolveMessageWatchOptions(options);
-  const controller = new AbortController();
-  const deadline = new Error("Message observation duration reached.");
-  const abort = () => controller.abort(ctx.signal?.reason);
-  ctx.signal?.addEventListener("abort", abort, { once: true });
-  if (ctx.signal?.aborted) abort();
-  const timer =
-    settings.timeoutSeconds === undefined
-      ? undefined
-      : setTimeout(() => controller.abort(deadline), settings.timeoutSeconds * 1000);
-  const watchCtx = { ...ctx, signal: controller.signal };
-  const seen = new Set<string>();
-  let initial = true;
-  let messageCount = 0;
-  try {
-    while (true) {
-      controller.signal.throwIfAborted();
-      const usernames =
-        settings.username === undefined
-          ? (await messageConversations(watchCtx)).conversations.map((item) => item.username)
-          : [settings.username];
-      const snapshot: PrivateMessage[] = [];
-      for (const username of usernames) {
-        try {
-          snapshot.push(...(await messageList(watchCtx, username)).messages);
-        } catch (error) {
-          // A filtered watcher can wait for the first message from a new peer.
-          if (!(error instanceof CliError && error.code === "MISSING_CONVERSATION")) throw error;
-        }
-      }
-      snapshot.sort(compareMessages);
-      controller.signal.throwIfAborted();
-      if (initial)
-        yield { event: "started", username: settings.username ?? null, history: HISTORY };
-      for (const message of snapshot) {
-        controller.signal.throwIfAborted();
-        if (seen.has(message.messageId)) continue;
-        seen.add(message.messageId);
-        if (
-          message.direction !== "incoming" ||
-          (initial && (settings.newOnly || message.isAcknowledged))
-        )
-          continue;
-        messageCount += 1;
-        yield { event: "message", message };
-      }
-      initial = false;
-      await delay(settings.pollIntervalMs, undefined, { signal: controller.signal });
-    }
-  } catch (error) {
-    if (!controller.signal.aborted || controller.signal.reason !== deadline) {
-      if (controller.signal.aborted) throw controller.signal.reason;
-      throw error;
-    }
-    yield { event: "ended", reason: "deadline", messageCount };
-  } finally {
-    clearTimeout(timer);
-    ctx.signal?.removeEventListener("abort", abort);
-  }
+export function messageWatchStream(
+  options: MessageWatchOptions = {},
+): Stream.Stream<MessageWatchEvent, RequestFailure, SlskdRequest> {
+  return Stream.fromPull(
+    Effect.gen(function* () {
+      const settings = yield* validate(() => resolveMessageWatchOptions(options));
+      const withinDeadline = watchDeadline(settings.timeoutSeconds);
+      const seen = new Set<string>();
+      let initial = true;
+      let messageCount = 0;
+      let phase: "snapshot" | "messages" | "poll" | "done" = "snapshot";
+      let snapshot: PrivateMessage[] = [];
+      let messageIndex = 0;
+      const next: Effect.Effect<MessageWatchEvent, RequestFailure | Cause.Done, SlskdRequest> =
+        Effect.gen(function* () {
+          while (true) {
+            if (phase === "done") return yield* Cause.done();
+            if (phase === "snapshot") {
+              const usernames =
+                settings.username === undefined
+                  ? (yield* messageConversationsEffect()).conversations.map((item) => item.username)
+                  : [settings.username];
+              snapshot = [];
+              for (const username of usernames) {
+                const history = yield* messageListEffect(username).pipe(
+                  Effect.catchTag("CoreFailure", (error) =>
+                    error.code === "MISSING_CONVERSATION"
+                      ? Effect.succeed(undefined)
+                      : Effect.fail(error),
+                  ),
+                );
+                // A filtered watcher can wait for the first message from a new peer.
+                if (history !== undefined) snapshot.push(...history.messages);
+              }
+              snapshot.sort(compareMessages);
+              messageIndex = 0;
+              phase = "messages";
+              if (initial)
+                return { event: "started", username: settings.username ?? null, history: HISTORY };
+            }
+            if (phase === "messages") {
+              while (messageIndex < snapshot.length) {
+                const message = snapshot[messageIndex++]!;
+                if (seen.has(message.messageId)) continue;
+                seen.add(message.messageId);
+                if (
+                  message.direction !== "incoming" ||
+                  (initial && (settings.newOnly || message.isAcknowledged))
+                )
+                  continue;
+                messageCount += 1;
+                return { event: "message", message };
+              }
+              snapshot = [];
+              initial = false;
+              phase = "poll";
+            }
+            if (phase === "poll") {
+              yield* Effect.sleep(settings.pollIntervalMs);
+              phase = "snapshot";
+            }
+          }
+        });
+      return Effect.suspend(() => (phase === "done" ? Cause.done() : withinDeadline(next))).pipe(
+        Effect.catchTag("WatchDeadline", () => {
+          phase = "done";
+          return Effect.succeed<MessageWatchEvent>({
+            event: "ended",
+            reason: "deadline",
+            messageCount,
+          });
+        }),
+        Effect.map((event) => [event] as const),
+      );
+    }),
+  );
 }

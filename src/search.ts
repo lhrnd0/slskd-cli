@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
+import * as Stream from "effect/Stream";
 import {
   CliError,
   CoreFailure,
@@ -10,6 +12,7 @@ import {
   requestEffect,
   runOperation,
 } from "./core.js";
+import { watchDeadline } from "./watch.js";
 
 export const DEFAULT_SEARCH_LIFETIME_SECONDS = 60;
 export const MAX_SEARCH_LIFETIME_SECONDS = 300;
@@ -288,13 +291,9 @@ export function searchCandidatesEffect(
   });
 }
 
-/** Temporary adapters for enqueue and Search watches awaiting migration. */
+/** Temporary Promise adapter retained until the final migration stage. */
 export function searchCandidates(ctx: Context, searchId: string): Promise<Candidate[]> {
   return runOperation(ctx, searchCandidatesEffect(searchId));
-}
-
-function getSearch(ctx: Context, searchId: string): Promise<JsonRecord> {
-  return runOperation(ctx, getSearchEffect(searchId));
 }
 
 export type SearchWatchEvent =
@@ -340,21 +339,6 @@ export function resolveSearchWatchOptions(options: SearchWatchOptions = {}): {
   return { pollIntervalMs, watchTimeoutSeconds };
 }
 
-function waitForPoll(intervalMs: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const abort = () => {
-      clearTimeout(timer);
-      reject(signal.reason);
-    };
-    const timer = setTimeout(() => {
-      signal.removeEventListener("abort", abort);
-      resolve();
-    }, intervalMs);
-    signal.addEventListener("abort", abort, { once: true });
-    if (signal.aborted) abort();
-  });
-}
-
 function collectionCompleted(search: JsonRecord): boolean {
   if (typeof search.state !== "string" || search.state.trim().length === 0) {
     throw new CliError("REMOTE", "slskd returned an invalid Search state.", REMOTE_EXIT);
@@ -364,66 +348,95 @@ function collectionCompleted(search: JsonRecord): boolean {
 }
 
 /** Observe only slskd-owned Search state; replay and deduplication are scoped to this invocation. */
-export async function* searchWatch(
-  ctx: Context,
+export function searchWatchStream(
   searchId: string,
   options: SearchWatchOptions = {},
-): AsyncGenerator<SearchWatchEvent> {
-  searchId = canonicalSearchId(searchId);
-  const { pollIntervalMs, watchTimeoutSeconds } = resolveSearchWatchOptions(options);
-
-  const controller = new AbortController();
-  const deadline = new Error("Search observation deadline reached.");
-  const abort = () => controller.abort(ctx.signal?.reason);
-  ctx.signal?.addEventListener("abort", abort, { once: true });
-  if (ctx.signal?.aborted) abort();
-  const timer = setTimeout(() => controller.abort(deadline), watchTimeoutSeconds * 1000);
-  const watchCtx = { ...ctx, signal: controller.signal };
-  const emitted = new Set<string>();
-  try {
-    let search = await getSearch(watchCtx, searchId);
-    // Validate state before advertising successful attachment.
-    collectionCompleted(search);
-    controller.signal.throwIfAborted();
-    yield { event: "started", searchId };
-    while (true) {
-      controller.signal.throwIfAborted();
-      const completed = collectionCompleted(search);
-      yield {
-        event: "progress",
-        searchId,
-        state: search.state as string,
-        responseCount: numberOrNull(search.responseCount),
-        fileCount: numberOrNull(search.fileCount),
-        lockedFileCount: numberOrNull(search.lockedFileCount),
-      };
-      const responses = await runOperation(
-        watchCtx,
-        requestEffect("GET", `searches/${encodeURIComponent(searchId)}/responses`).pipe(
-          Effect.mapError(mapMissingSearch),
-        ),
+): Stream.Stream<SearchWatchEvent, RequestFailure, SlskdRequest> {
+  return Stream.fromPull(
+    Effect.gen(function* () {
+      const id = yield* validate(() => canonicalSearchId(searchId));
+      const { pollIntervalMs, watchTimeoutSeconds } = yield* validate(() =>
+        resolveSearchWatchOptions(options),
       );
-      for (const candidate of candidatesFromResponses(searchId, responses)) {
-        controller.signal.throwIfAborted();
-        if (emitted.has(candidate.candidateId)) continue;
-        emitted.add(candidate.candidateId);
-        yield { event: "candidate", searchId, candidate };
-      }
-      controller.signal.throwIfAborted();
-      if (completed) {
-        yield { event: "ended", searchId, reason: "completed", candidateCount: emitted.size };
-        return;
-      }
-      await waitForPoll(pollIntervalMs, controller.signal);
-      search = await getSearch(watchCtx, searchId);
-    }
-  } catch (error) {
-    if (error !== deadline) throw error;
-    yield { event: "ended", searchId, reason: "deadline", candidateCount: emitted.size };
-  } finally {
-    clearTimeout(timer);
-    ctx.signal?.removeEventListener("abort", abort);
-  }
+      const withinDeadline = watchDeadline(watchTimeoutSeconds);
+      const emitted = new Set<string>();
+      let phase: "attach" | "progress" | "responses" | "candidates" | "poll" | "done" = "attach";
+      let search: JsonRecord = {};
+      let completed = false;
+      let candidates: Candidate[] = [];
+      let candidateIndex = 0;
+      const next: Effect.Effect<SearchWatchEvent, RequestFailure | Cause.Done, SlskdRequest> =
+        Effect.gen(function* () {
+          while (true) {
+            if (phase === "done") return yield* Cause.done();
+            if (phase === "attach") {
+              search = yield* getSearchEffect(id);
+              // Validate state before advertising successful attachment.
+              completed = yield* validate(() => collectionCompleted(search));
+              phase = "progress";
+              return { event: "started", searchId: id };
+            }
+            if (phase === "progress") {
+              completed = yield* validate(() => collectionCompleted(search));
+              phase = "responses";
+              return {
+                event: "progress",
+                searchId: id,
+                state: search.state as string,
+                responseCount: numberOrNull(search.responseCount),
+                fileCount: numberOrNull(search.fileCount),
+                lockedFileCount: numberOrNull(search.lockedFileCount),
+              };
+            }
+            if (phase === "responses") {
+              const responses = yield* requestEffect(
+                "GET",
+                `searches/${encodeURIComponent(id)}/responses`,
+              ).pipe(Effect.mapError(mapMissingSearch));
+              candidates = yield* validate(() => candidatesFromResponses(id, responses));
+              candidateIndex = 0;
+              phase = "candidates";
+            }
+            if (phase === "candidates") {
+              while (candidateIndex < candidates.length) {
+                const candidate = candidates[candidateIndex++]!;
+                if (emitted.has(candidate.candidateId)) continue;
+                emitted.add(candidate.candidateId);
+                return { event: "candidate", searchId: id, candidate };
+              }
+              candidates = [];
+              if (completed) {
+                phase = "done";
+                return {
+                  event: "ended",
+                  searchId: id,
+                  reason: "completed",
+                  candidateCount: emitted.size,
+                };
+              }
+              phase = "poll";
+            }
+            if (phase === "poll") {
+              yield* Effect.sleep(pollIntervalMs);
+              search = yield* getSearchEffect(id);
+              phase = "progress";
+            }
+          }
+        });
+      return Effect.suspend(() => (phase === "done" ? Cause.done() : withinDeadline(next))).pipe(
+        Effect.catchTag("WatchDeadline", () => {
+          phase = "done";
+          return Effect.succeed<SearchWatchEvent>({
+            event: "ended",
+            searchId: id,
+            reason: "deadline",
+            candidateCount: emitted.size,
+          });
+        }),
+        Effect.map((event) => [event] as const),
+      );
+    }),
+  );
 }
 
 /** Resolve a scoped candidate ID by re-reading slskd, keeping IDs stateless and deterministic. */
