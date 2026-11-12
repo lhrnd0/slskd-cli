@@ -363,7 +363,7 @@ export const slskdRequestLayer = Layer.effect(
   })),
 );
 
-function publicFailure<E>(error: E): E | CliError | unknown {
+export function publicFailure<E>(error: E): E | CliError | unknown {
   if (error instanceof CoreFailure) return new CliError(error.code, error.message, error.exitCode);
   if (error instanceof RequestInterrupted) return error.reason;
   return error;

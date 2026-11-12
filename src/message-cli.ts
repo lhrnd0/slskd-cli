@@ -1,9 +1,22 @@
-import { CliError, compatible, requireYes, resolveContext } from "./core.js";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import {
-  messageAcknowledge,
-  messageConversations,
-  messageList,
-  messageSend,
+  CliError,
+  ConnectionProfile,
+  CoreFailure,
+  type RequestFailure,
+  compatibleEffect,
+  failure,
+  publicFailure,
+  requireYes,
+  resolveContextEffect,
+  slskdRequestLayer,
+} from "./core.js";
+import {
+  messageAcknowledgeEffect,
+  messageConversationsEffect,
+  messageListEffect,
+  messageSendEffect,
   messageUsername,
   messageWatch,
   resolveMessageWatchOptions,
@@ -98,27 +111,43 @@ function invalid(message: string): never {
   throw new CliError("INVALID_INPUT", message, 2);
 }
 
-async function inputText(flags: Flags): Promise<string> {
-  if ((typeof flags.text === "string") === (flags.stdin === true))
-    invalid("Supply --text or --stdin, not both.");
-  let text: string;
-  if (typeof flags.text === "string") text = flags.text;
-  else {
-    if (process.stdin.isTTY) invalid("--stdin requires piped input or input redirection.");
-    process.stdin.setEncoding("utf8");
-    text = "";
-    try {
-      for await (const chunk of process.stdin) text += chunk;
-    } catch {
-      throw new CliError("INPUT", "Could not read message text from stdin.", 2);
-    }
-  }
-  if (!text.trim()) invalid("Message text must not be blank.");
-  return text;
+function commandFailure(error: unknown): CoreFailure {
+  return error instanceof CliError
+    ? failure(error.code, error.message, error.exitCode)
+    : failure("REMOTE", "Unexpected CLI failure.", 7);
+}
+
+function inputTextEffect(flags: Flags): Effect.Effect<string, CoreFailure> {
+  return Effect.gen(function* () {
+    const direct = yield* Effect.try({
+      try: () => {
+        if ((typeof flags.text === "string") === (flags.stdin === true))
+          invalid("Supply --text or --stdin, not both.");
+        if (typeof flags.text === "string") return flags.text;
+        if (process.stdin.isTTY) invalid("--stdin requires piped input or input redirection.");
+        return undefined;
+      },
+      catch: commandFailure,
+    });
+    const text =
+      direct ??
+      (yield* Effect.tryPromise({
+        try: async () => {
+          process.stdin.setEncoding("utf8");
+          let text = "";
+          for await (const chunk of process.stdin) text += chunk;
+          return text;
+        },
+        catch: () => failure("INPUT", "Could not read message text from stdin.", 2),
+      }));
+    if (!text.trim())
+      return yield* Effect.fail(failure("INVALID_INPUT", "Message text must not be blank.", 2));
+    return text;
+  });
 }
 
 /** Validate this command's complete flag set before configuration or network access. */
-export async function runMessageCommand(words: string[], flags: Flags) {
+function validateMessageCommand(words: string[], flags: Flags) {
   const command = words[1];
   const allowed: Record<string, string[]> = {
     conversations: ["unacknowledged"],
@@ -139,7 +168,6 @@ export async function runMessageCommand(words: string[], flags: Flags) {
   const ids = Array.isArray(flags.id) ? flags.id : typeof flags.id === "string" ? [flags.id] : [];
   if (command === "acknowledge" && (flags.all === true) === ids.length > 0)
     invalid("Select one or more --id message references or use --all, not both.");
-  const text = command === "send" ? await inputText(flags) : undefined;
   const watchOptions =
     command === "watch"
       ? resolveMessageWatchOptions({
@@ -151,27 +179,61 @@ export async function runMessageCommand(words: string[], flags: Flags) {
           ...(flags.timeout === undefined ? {} : { timeoutSeconds: Number(flags.timeout) }),
         })
       : undefined;
-  const ctx = resolveContext(flags);
-  if (watchOptions !== undefined) {
-    await runObservation(ctx, (watchCtx) => messageWatch(watchCtx, watchOptions));
-    return undefined;
-  }
-  await compatible(ctx);
-  if (command === "conversations")
-    return { exitCode: 0, result: await messageConversations(ctx, flags.unacknowledged === true) };
-  if (command === "list")
-    return {
-      exitCode: 0,
-      result: await messageList(ctx, words[2]!, flags.unacknowledged === true),
-    };
-  if (command === "send")
-    return { exitCode: 0, result: await messageSend(ctx, words[2]!, text!, flags.yes) };
-  const { exitCode, ...result } = await messageAcknowledge(
-    ctx,
-    words[2]!,
-    ids,
-    flags.all === true,
-    flags.yes,
+  return { command, ids, watchOptions };
+}
+
+type MessageCommandResult = { exitCode: number; result: unknown } | undefined;
+
+export function runMessageCommandEffect(
+  words: string[],
+  flags: Flags,
+): Effect.Effect<MessageCommandResult, RequestFailure> {
+  return Effect.gen(function* () {
+    const { command, ids, watchOptions } = yield* Effect.try({
+      try: () => validateMessageCommand(words, flags),
+      catch: commandFailure,
+    });
+    const text = command === "send" ? yield* inputTextEffect(flags) : undefined;
+    const ctx = yield* resolveContextEffect(flags);
+    if (watchOptions !== undefined) {
+      // Temporary lifecycle adapter until the watch stream migration.
+      yield* Effect.tryPromise({
+        try: () => runObservation(ctx, (watchCtx) => messageWatch(watchCtx, watchOptions)),
+        catch: commandFailure,
+      });
+      return undefined;
+    }
+    const operation = Effect.gen(function* () {
+      yield* compatibleEffect;
+      if (command === "conversations")
+        return {
+          exitCode: 0,
+          result: yield* messageConversationsEffect(flags.unacknowledged === true),
+        };
+      if (command === "list")
+        return {
+          exitCode: 0,
+          result: yield* messageListEffect(words[2]!, flags.unacknowledged === true),
+        };
+      if (command === "send")
+        return { exitCode: 0, result: yield* messageSendEffect(words[2]!, text!, flags.yes) };
+      const { exitCode, ...result } = yield* messageAcknowledgeEffect(
+        words[2]!,
+        ids,
+        flags.all === true,
+        flags.yes,
+      );
+      return { exitCode, result };
+    });
+    return yield* operation.pipe(
+      Effect.provide(slskdRequestLayer.pipe(Layer.provide(Layer.succeed(ConnectionProfile, ctx)))),
+    );
+  });
+}
+
+/** Temporary runtime boundary until command parsing moves to Effect. */
+export function runMessageCommand(words: string[], flags: Flags) {
+  return Effect.runPromise(
+    runMessageCommandEffect(words, flags).pipe(Effect.mapError(publicFailure)),
   );
-  return { exitCode, result };
 }
