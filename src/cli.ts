@@ -1,13 +1,21 @@
 #!/usr/bin/env node
-import { CliError, check, compatible, resolveContext, requireYes } from "./core.js";
 import {
-  searchCreate,
-  searchCandidates,
-  searchDelete,
-  searchList,
+  CliError,
+  check,
+  compatible,
+  compatibleEffect,
+  runOperation,
+  resolveContext,
+  requireYes,
+} from "./core.js";
+import {
+  searchCreateEffect,
+  searchCandidatesEffect,
+  searchDeleteEffect,
+  searchListEffect,
   resolveSearchWatchOptions,
 } from "./search.js";
-import { folderDiscover, folderShow } from "./folder.js";
+import { folderDiscoverEffect, folderShowEffect } from "./folder.js";
 import { folderEnqueue } from "./folder-enqueue.js";
 import { transferEnqueue } from "./enqueue.js";
 import { transferCancel, transferClear, transferDelete, transferInspect } from "./transfer.js";
@@ -325,29 +333,36 @@ async function run(argv: string[]): Promise<unknown> {
     await runSearchWatch(ctx, words[2]!, watchOptions);
     return new StreamedResult();
   }
-  await compatible(ctx);
+  if (words[0] === "search") {
+    await runOperation(ctx, compatibleEffect);
+  } else {
+    await compatible(ctx);
+  }
   if (command === "search list") {
     requireWords(words, 2);
-    return { searches: await searchList(ctx) };
+    return { searches: await runOperation(ctx, searchListEffect) };
   }
   if (command === "search create") {
     requireWords(words, 2);
     const lifetime =
       flags["lifetime-seconds"] === undefined ? 60 : Number(flags["lifetime-seconds"]);
-    return searchCreate(ctx, flags.query as string, lifetime);
+    return runOperation(ctx, searchCreateEffect(flags.query as string, lifetime));
   }
   if (command === "search candidates") {
     requireWords(words, 3);
-    return { searchId: words[2], candidates: await searchCandidates(ctx, words[2]!) };
+    return {
+      searchId: words[2],
+      candidates: await runOperation(ctx, searchCandidatesEffect(words[2]!)),
+    };
   }
   if (command === "search delete") {
     requireWords(words, 3);
-    return searchDelete(ctx, words[2]!);
+    return runOperation(ctx, searchDeleteEffect(words[2]!));
   }
   if (command === "search folder") {
-    if (words.length === 3) return folderShow(ctx, words[2]!, flags.yes);
+    if (words.length === 3) return runOperation(ctx, folderShowEffect(words[2]!, flags.yes));
     requireWords(words, 4);
-    return folderDiscover(ctx, words[2]!, words[3]!, flags.yes);
+    return runOperation(ctx, folderDiscoverEffect(words[2]!, words[3]!, flags.yes));
   }
   if (command === "transfer enqueue" && words[2]?.startsWith("folder_")) {
     if (words.some((word) => !word))
