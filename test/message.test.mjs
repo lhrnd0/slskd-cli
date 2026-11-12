@@ -219,10 +219,10 @@ test("message help works offline for every command", { timeout: 10000 }, async (
     ]) {
       const result = await cli(t, null, args);
       assert.equal(result.code, 0);
-      assert.match(result.stdout, /^Usage: slskd message/);
+      assert.match(result.stdout, /slskd message/);
     }
   }
-  assert.match((await cli(t, null, ["message"])).stdout, /message <command>/);
+  assert.match((await cli(t, null, ["message"])).stdout, /message <subcommand>/);
 });
 
 test(

@@ -45,7 +45,7 @@ export class CoreFailure extends Data.TaggedError("CoreFailure")<{
   readonly status: number | undefined;
 }> {}
 
-/** Preserve the caller's cancellation reason across the Promise adapter. */
+/** Preserve the caller's cancellation reason across the request boundary. */
 export class RequestInterrupted extends Data.TaggedError("RequestInterrupted")<{
   readonly reason: unknown;
 }> {}
@@ -188,11 +188,6 @@ export function resolveContextEffect(
 
 export function connectionProfileLayer(flags: Flags = {}, env: NodeJS.ProcessEnv = process.env) {
   return Layer.effect(ConnectionProfile, resolveContextEffect(flags, env));
-}
-
-/** Temporary synchronous adapter for commands awaiting migration. */
-export function resolveContext(flags: Flags = {}, env: NodeJS.ProcessEnv = process.env): Context {
-  return Effect.runSync(resolveContextEffect(flags, env).pipe(Effect.mapError(publicFailure)));
 }
 
 function safeMessage(ctx: Context, message: string): string {
@@ -369,40 +364,6 @@ export function publicFailure<E>(error: E): E | CliError | unknown {
   return error;
 }
 
-/** Temporary runtime boundary for Promise-based command adapters. */
-export function runOperation<A, E>(
-  ctx: Context,
-  operation: Effect.Effect<A, E, SlskdRequest | ConnectionProfile>,
-): Promise<A> {
-  const services = slskdRequestLayer.pipe(
-    Layer.provideMerge(Layer.succeed(ConnectionProfile, ctx)),
-  );
-  return Effect.runPromise(
-    operation.pipe(Effect.provide(services), Effect.mapError(publicFailure)),
-  );
-}
-
-/** Temporary Promise adapters for commands awaiting migration. */
-export function request(
-  ctx: Context,
-  method: string,
-  path: string,
-  body?: unknown,
-  mutation = false,
-): Promise<unknown> {
-  return runOperation(ctx, requestEffect(method, path, body, mutation));
-}
-
-export function requestWithStatus(
-  ctx: Context,
-  method: string,
-  path: string,
-  body?: unknown,
-  mutation = false,
-): Promise<RequestResponse> {
-  return runOperation(ctx, requestWithStatusEffect(method, path, body, mutation));
-}
-
 function versionFrom(value: unknown): string | undefined {
   if (typeof value === "string") return value;
   if (value && typeof value === "object") {
@@ -453,21 +414,6 @@ export const compatibleEffect: Effect.Effect<Compatibility, RequestFailure, Slsk
     }
     return { compatible: true, version, apiKeyRole: "unverified" };
   });
-
-export function compatible(ctx: Context): Promise<Compatibility> {
-  return runOperation(ctx, compatibleEffect);
-}
-
-/** Resolve configuration and check compatibility within one runtime. */
-export function check(
-  flags: Flags = {},
-  env: NodeJS.ProcessEnv = process.env,
-): Promise<Compatibility> {
-  const services = slskdRequestLayer.pipe(Layer.provide(connectionProfileLayer(flags, env)));
-  return Effect.runPromise(
-    compatibleEffect.pipe(Effect.provide(services), Effect.mapError(publicFailure)),
-  );
-}
 
 export function requireYes(yes: unknown): void {
   if (yes !== true)

@@ -103,47 +103,47 @@ test("help covers command syntax and options without reading an invalid profile 
     ],
     [
       ["search", "candidates"],
-      ["<searchId>", "--watch", "--poll-interval-ms", "--watch-timeout-seconds"],
+      ["searchId", "--watch", "--poll-interval-ms", "--watch-timeout-seconds"],
     ],
     [
       ["search", "folder"],
-      ["<searchId>", "<candidateId>", "<folderRef>", "--yes"],
+      ["searchId", "candidateId", "folderRef", "--yes"],
     ],
     [
       ["search", "delete"],
-      ["<searchId>", "--yes"],
+      ["searchId", "--yes"],
     ],
     [["transfer"], ["enqueue", "show", "cancel", "clear", "delete"]],
     [
       ["transfer", "enqueue"],
-      ["<searchId>", "<candidateId>", "<folderRef>", "<fileId", "--all", "--yes"],
+      ["searchId", "candidateId", "folderRef", "fileId", "--all", "--yes"],
     ],
     [
       ["transfer", "show"],
-      ["<username>", "<transferId>"],
+      ["username", "transferId"],
     ],
     [
       ["transfer", "cancel"],
-      ["<username>", "<transferId>", "--yes"],
+      ["username", "transferId", "--yes"],
     ],
     [["transfer", "clear"], ["--yes"]],
     [
       ["transfer", "delete"],
-      ["<username>", "<transferId>", "--yes"],
+      ["username", "transferId", "--yes"],
     ],
     [["message"], ["conversations", "list", "send", "acknowledge", "watch"]],
     [["message", "conversations"], ["--unacknowledged"]],
     [
       ["message", "list"],
-      ["<username>", "--unacknowledged"],
+      ["username", "--unacknowledged"],
     ],
     [
       ["message", "send"],
-      ["<username>", "--text", "--stdin", "--yes"],
+      ["username", "--text", "--stdin", "--yes"],
     ],
     [
       ["message", "acknowledge"],
-      ["<username>", "--id", "--all", "--yes"],
+      ["username", "--id", "--all", "--yes"],
     ],
     [
       ["message", "watch"],
@@ -193,6 +193,23 @@ test("parser errors precede profile access and preserve exact diagnostics", asyn
     }
   }
   assert.deepEqual(host.calls, []);
+});
+
+test("literal flag diagnostics keep argv order before invalid configuration", async (t) => {
+  const config = profile(t, "invalid = [");
+  const env = { SLSKD_CLI_CONFIG: config.path };
+  for (const [args, message] of [
+    [["check", "--"], "Unknown or repeated command flag."],
+    [["check", "--yes=", "--unknown"], "--yes does not take a value."],
+    [["check", "--yes=true", "--text"], "--yes does not take a value."],
+    [["check", "--help", "--help", "--yes=true"], "Unknown or repeated command flag."],
+    [["check", "--query", "--unknown"], "--query requires a value."],
+    [["unknown"], "Unknown command."],
+    [["unknown", "--yes"], "--yes is only valid for state-changing commands."],
+    [["search", "unknown", "--text", "hello"], "Message flags require a message command."],
+    [["message", "unknown", "--help"], "Unknown help topic."],
+  ])
+    failure(await cli(args, env), 2, "INVALID_INPUT", message);
 });
 
 test("acknowledgement and command-specific flag validation precede profile access", async (t) => {

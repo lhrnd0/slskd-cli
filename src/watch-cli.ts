@@ -15,7 +15,6 @@ import {
   publicFailure,
   slskdRequestLayer,
 } from "./core.js";
-import { canonicalSearchId, searchWatchStream } from "./search.js";
 
 class ObservationStopped extends Data.TaggedError("ObservationStopped")<{
   readonly exitCode: number;
@@ -140,17 +139,5 @@ export function runObservationEffect(
           process.exitCode = 0;
       }
     }),
-  );
-}
-
-/** Temporary runtime boundary until command parsing moves to Effect. */
-export function runSearchWatch(
-  ctx: Context,
-  searchId: string,
-  options: { pollIntervalMs: number; watchTimeoutSeconds: number },
-): Promise<void> {
-  searchId = canonicalSearchId(searchId);
-  return Effect.runPromise(
-    runObservationEffect(ctx, searchWatchStream(searchId, options), { searchId }),
   );
 }
