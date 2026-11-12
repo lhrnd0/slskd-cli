@@ -775,7 +775,7 @@ test("search delete requires acknowledgement and removes the Search", async () =
 });
 
 test("search delete validates IDs and reports an ambiguous timeout without retrying", async () => {
-  const host = await fixture({ delaySearchDelete: 200 });
+  const host = await fixture({ delaySearchDelete: 3000 });
   const env = { SLSKD_BASE_URL: host.url, SLSKD_API_KEY: "secret" };
   try {
     const invalid = await cli(["search", "delete", "not-a-uuid", "--yes"], env);
@@ -786,7 +786,10 @@ test("search delete validates IDs and reports an ambiguous timeout without retry
       false,
     );
 
-    const timedOut = await cli(["search", "delete", SEARCH_ID, "--yes", "--timeout-ms", "50"], env);
+    const timedOut = await cli(
+      ["search", "delete", SEARCH_ID, "--yes", "--timeout-ms", "1000"],
+      env,
+    );
     assert.equal(timedOut.code, 9);
     assert.equal(timedOut.json.error.code, "AMBIGUOUS_MUTATION");
     assert.equal(host.calls.filter((call) => call.method === "DELETE").length, 1);
