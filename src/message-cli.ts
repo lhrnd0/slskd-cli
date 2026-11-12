@@ -18,10 +18,10 @@ import {
   messageListEffect,
   messageSendEffect,
   messageUsername,
-  messageWatch,
+  messageWatchStream,
   resolveMessageWatchOptions,
 } from "./message.js";
-import { runObservation } from "./watch-cli.js";
+import { runObservationEffect } from "./watch-cli.js";
 
 type Flags = Record<string, string | boolean | string[]>;
 
@@ -196,11 +196,7 @@ export function runMessageCommandEffect(
     const text = command === "send" ? yield* inputTextEffect(flags) : undefined;
     const ctx = yield* resolveContextEffect(flags);
     if (watchOptions !== undefined) {
-      // Temporary lifecycle adapter until the watch stream migration.
-      yield* Effect.tryPromise({
-        try: () => runObservation(ctx, (watchCtx) => messageWatch(watchCtx, watchOptions)),
-        catch: commandFailure,
-      });
+      yield* runObservationEffect(ctx, messageWatchStream(watchOptions));
       return undefined;
     }
     const operation = Effect.gen(function* () {

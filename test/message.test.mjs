@@ -757,6 +757,39 @@ test("watch duration aborts a pending history response", { timeout: 10000 }, asy
   assert.equal(host.calls.filter((item) => item.path.endsWith("/messages")).length, 1);
 });
 
+test(
+  "watch duration interrupts a pending history body and reports only its deadline",
+  { timeout: 10000 },
+  async (t) => {
+    const bodyClosed = deferred();
+    const host = await fixture(t, {
+      override(call, { res }) {
+        if (!call.path.endsWith("/messages")) return;
+        res.on("close", bodyClosed.resolve);
+        res.writeHead(200, { "content-type": "application/json" });
+        res.write("[");
+        return true;
+      },
+    });
+    const result = await startCli(t, host, [
+      "message",
+      "watch",
+      "--username",
+      "alice",
+      "--timeout",
+      "1",
+    ]).closed;
+    await bodyClosed.promise;
+    assert.equal(result.code, 0);
+    assert.equal(result.stderr, "");
+    assert.deepEqual(result.records, [
+      { ok: true, result: { event: "ended", reason: "deadline", messageCount: 0 } },
+    ]);
+    assert.equal(host.calls.filter((item) => item.path.endsWith("/messages")).length, 1);
+    assert.deepEqual(mutations(host), []);
+  },
+);
+
 test("watch fails visibly on a later poll without retrying", { timeout: 10000 }, async (t) => {
   let historyCalls = 0;
   const host = await fixture(t, {
@@ -966,7 +999,7 @@ test(
     assert.equal(host.calls.filter((call) => call.path.endsWith("/messages")).length, 1);
     child.child.stdout.destroy();
     const result = await child.closed;
-    assert.equal(result.code, 0);
+    assert.equal(result.code, 0, result.stderr);
     assert.equal(result.stderr, "");
     assert.deepEqual(mutations(host), []);
   },
