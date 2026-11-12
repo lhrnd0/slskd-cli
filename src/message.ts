@@ -5,14 +5,12 @@ import * as Stream from "effect/Stream";
 import {
   CliError,
   CoreFailure,
-  type Context,
   type RequestFailure,
   SlskdRequest,
   failure,
   requestEffect,
   requestWithStatusEffect,
   requireYes,
-  runOperation,
 } from "./core.js";
 import { watchDeadline } from "./watch.js";
 
@@ -391,29 +389,6 @@ export function messageAcknowledgeEffect(
     }
     return { exitCode, username, all: false, messages: outcomes };
   });
-}
-
-/** Temporary Promise adapters retained until the final migration stage. */
-export function messageConversations(ctx: Context, unacknowledged = false) {
-  return runOperation(ctx, messageConversationsEffect(unacknowledged));
-}
-
-export function messageList(ctx: Context, username: string, unacknowledged = false) {
-  return runOperation(ctx, messageListEffect(username, unacknowledged));
-}
-
-export function messageSend(ctx: Context, username: string, text: string, yes: unknown) {
-  return runOperation(ctx, messageSendEffect(username, text, yes));
-}
-
-export function messageAcknowledge(
-  ctx: Context,
-  username: string,
-  ids: string[],
-  all: boolean,
-  yes: unknown,
-) {
-  return runOperation(ctx, messageAcknowledgeEffect(username, ids, all, yes));
 }
 
 export type MessageWatchOptions = {

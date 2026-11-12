@@ -8,12 +8,11 @@ The runtime provides cancellation across the complete request, including respons
 This adds a production dependency and requires contributors to understand Effect services, layers, and cancellation.
 Pure calculations and identifier generation remain ordinary functions.
 Native fetch and the existing TOML parser remain at the system boundaries.
-The current services do not require a separate Node platform package.
+Effect CLI requires platform services supplied by `@effect/platform-node` 4.1.4.
 
 Public commands, JSON, operational errors, and exit codes remain stable during the migration.
-Temporary Promise adapters map typed failures to the existing public errors until all commands use Effect.
+The executable maps typed failures to the existing public JSON errors at its runtime boundary.
 Internal HTTP failures retain numeric status values for operation decisions.
-Adapters preserve existing HTTP status message text for commands awaiting migration.
 Request timeouts cover headers and complete bodies.
 External cancellation retains its original reason and takes precedence when it first aborts the request.
 Requests have no automatic retries, and state-changing requests remain sequential.

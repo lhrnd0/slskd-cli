@@ -3,13 +3,11 @@ import * as Effect from "effect/Effect";
 import {
   CliError,
   CoreFailure,
-  type Context,
   type RequestFailure,
   type SlskdRequest,
   failure,
   requestEffect,
   requireYes,
-  runOperation,
 } from "./core.js";
 import { resolveCandidateEffect, type Candidate } from "./search.js";
 
@@ -224,13 +222,4 @@ export function folderShowEffect(
     const [username, directory] = yield* validate(() => decodeFolderRef(folderReference));
     return yield* listingEffect(username, directory);
   });
-}
-
-/** Temporary adapter for folder enqueue awaiting migration. */
-export function folderShow(
-  ctx: Context,
-  folderReference: string,
-  yes: unknown,
-): Promise<FolderListing> {
-  return runOperation(ctx, folderShowEffect(folderReference, yes));
 }

@@ -5,12 +5,10 @@ import * as Stream from "effect/Stream";
 import {
   CliError,
   CoreFailure,
-  type Context,
   type RequestFailure,
   type SlskdRequest,
   failure,
   requestEffect,
-  runOperation,
 } from "./core.js";
 import { watchDeadline } from "./watch.js";
 
@@ -291,11 +289,6 @@ export function searchCandidatesEffect(
   });
 }
 
-/** Temporary Promise adapter retained until the final migration stage. */
-export function searchCandidates(ctx: Context, searchId: string): Promise<Candidate[]> {
-  return runOperation(ctx, searchCandidatesEffect(searchId));
-}
-
 export type SearchWatchEvent =
   | { event: "started"; searchId: string }
   | {
@@ -463,12 +456,4 @@ export function resolveCandidateEffect(
     }
     return candidate;
   });
-}
-
-export function resolveCandidate(
-  ctx: Context,
-  searchId: string,
-  candidateId: string,
-): Promise<Candidate> {
-  return runOperation(ctx, resolveCandidateEffect(searchId, candidateId));
 }

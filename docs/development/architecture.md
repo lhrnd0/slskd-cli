@@ -2,8 +2,11 @@
 
 The CLI provides a deterministic interface to one trusted slskd instance.
 Each process resolves a Connection profile, checks compatibility, and performs the requested operation.
-The `check` command uses Effect services for its Connection profile and authenticated requests.
-Other commands temporarily use adapters over the same request service.
+Effect 4.1.4 runs command parsing, configuration, authenticated requests, operations, and watch streams.
+One command tree supplies argument definitions, validation policies, and generated offline help.
+Schema validates positional arguments at each command's existing validation boundary.
+Command annotations control permitted flags and generated help visibility.
+A narrow lexical bridge preserves literal booleans, single-dash values, and diagnostic order from command metadata.
 slskd owns Search, Transfer, and Private message state.
 
 ## Modules
@@ -12,7 +15,8 @@ Paths below are relative to the repository root.
 
 | Module                  | Responsibility                                                                          |
 | ----------------------- | --------------------------------------------------------------------------------------- |
-| `src/cli.ts`            | Parse commands, provide help, dispatch operations, and emit JSON                        |
+| `src/cli.ts`            | Run Effect operations and emit JSON                                                     |
+| `src/commands.ts`       | Define commands, validate arguments and flags, and generate offline help                |
 | `src/core.ts`           | Resolve configuration, authenticate requests, enforce timeouts, and check compatibility |
 | `src/search.ts`         | Create and inspect Searches, normalize Candidates, and produce Search watch events      |
 | `src/folder.ts`         | Discover peer directories and return folder and file references                         |
@@ -20,7 +24,7 @@ Paths below are relative to the repository root.
 | `src/folder-enqueue.ts` | Enqueue folder selections and preserve per-file outcomes                                |
 | `src/batch.ts`          | Derive deterministic batch identifiers                                                  |
 | `src/transfer.ts`       | Inspect and mutate download records                                                     |
-| `src/message-cli.ts`    | Validate message commands and provide message help                                      |
+| `src/message-cli.ts`    | Validate message inputs, read stdin, and run message operations                         |
 | `src/message.ts`        | Inspect, send, acknowledge, and observe Private messages                                |
 | `src/watch-cli.ts`      | Write watch streams and handle signals, backpressure, and closed pipes                  |
 
@@ -43,6 +47,9 @@ The public interface consists of commands, JSON results, watch events, and exit 
 Start with the [command reference](../README.md#commands); internal TypeScript modules are implementation details.
 Tests launch the built CLI against fixture HTTP servers.
 Package checks also run those tests against a temporary installation.
+The executable starts one Effect runtime and provides explicit Connection profile and request layers.
+Native fetch, stdin, stdout callbacks, and process signals remain external I/O boundaries.
+`@effect/platform-node` 4.1.4 supplies the platform services required by Effect CLI.
 
 For behavior changes, use authoritative slskd documentation and compatible-version upstream source.
 Keep proposed behavior in [research](../research/search-filtering.md) separate from implemented command documentation.
