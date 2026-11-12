@@ -2,7 +2,7 @@
 
 Spec: `slskd-cli-bbl` — Migrate slskd-cli to Effect without changing the CLI contract.
 
-Twelve agents have worked on this migration: one coordinator and eleven subagents.
+Thirteen agents have worked on this migration: one coordinator and twelve subagents.
 The maximum concurrency was four agents, including the coordinator.
 Reused agents count once.
 
@@ -20,6 +20,9 @@ Reused agents count once.
 | parser           | Stage 7 command parsing            | Inherited session model                        |
 | review_spec      | Independent spec review            | Inherited session model                        |
 | review_standards | Independent standards review       | Inherited session model                        |
+
+The `review_fixes` agent resolves the independent review findings.
+It also inherits the session model without an override.
 
 No spawn call selected a model override.
 Earlier runtime instructions did not expose exact model identifiers for the subagents.
