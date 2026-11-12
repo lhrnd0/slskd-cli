@@ -6,6 +6,7 @@ import {
   type SlskdRequest,
   failure,
   requestEffect,
+  validateEffect as validate,
   requireYes,
 } from "./core.js";
 
@@ -110,16 +111,6 @@ function missingTransfer(): CoreFailure {
 
 function mapMissingTransfer(error: RequestFailure): RequestFailure {
   return error instanceof CoreFailure && error.status === 404 ? missingTransfer() : error;
-}
-
-function validate<A>(evaluate: () => A): Effect.Effect<A, CoreFailure> {
-  return Effect.try({
-    try: evaluate,
-    catch: (error) =>
-      error instanceof CliError
-        ? failure(error.code, error.message, error.exitCode)
-        : failure("REMOTE", "Unexpected CLI failure.", 7),
-  });
 }
 
 function getRawEffect(

@@ -9,6 +9,7 @@ import {
   type SlskdRequest,
   failure,
   requestEffect,
+  validateEffect as validate,
 } from "./core.js";
 import { watchDeadline } from "./watch.js";
 
@@ -78,17 +79,6 @@ export function canonicalSearchId(searchId: string): string {
     throw inputError("searchId must be the UUID returned by slskd search create or search list.");
   }
   return searchId.toLowerCase();
-}
-
-/** Keep throwing pure validators at the typed operation boundary. */
-function validate<A>(evaluate: () => A): Effect.Effect<A, CoreFailure> {
-  return Effect.try({
-    try: evaluate,
-    catch: (error) =>
-      error instanceof CliError
-        ? failure(error.code, error.message, error.exitCode)
-        : failure("REMOTE", "Unexpected CLI failure.", REMOTE_EXIT),
-  });
 }
 
 function missingSearchError(): CoreFailure {

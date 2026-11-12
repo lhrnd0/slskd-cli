@@ -5,8 +5,8 @@ import {
   CoreFailure,
   type RequestFailure,
   type SlskdRequest,
-  failure,
   requestEffect,
+  validateEffect as validate,
   requireYes,
 } from "./core.js";
 import { folderShowEffect, type FolderFile } from "./folder.js";
@@ -51,15 +51,6 @@ function batchId(username: string, files: FolderFile[]): string {
 }
 function isHttp(error: RequestFailure, status: number): boolean {
   return error instanceof CoreFailure && error.status === status;
-}
-function validate<A>(evaluate: () => A): Effect.Effect<A, CoreFailure> {
-  return Effect.try({
-    try: evaluate,
-    catch: (error) =>
-      error instanceof CliError
-        ? failure(error.code, error.message, error.exitCode)
-        : failure("REMOTE", "Unexpected CLI failure.", 7),
-  });
 }
 function matches(transfer: TransferResult, username: string, file: FolderFile): boolean {
   return (

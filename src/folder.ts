@@ -7,6 +7,7 @@ import {
   type SlskdRequest,
   failure,
   requestEffect,
+  validateEffect as validate,
   requireYes,
 } from "./core.js";
 import { resolveCandidateEffect, type Candidate } from "./search.js";
@@ -90,16 +91,6 @@ function fileId(username: string, directory: string, path: string, size: number 
   return `file_${createHash("sha256")
     .update(JSON.stringify([username, directory, path, size]))
     .digest("base64url")}`;
-}
-
-function validate<A>(evaluate: () => A): Effect.Effect<A, CoreFailure> {
-  return Effect.try({
-    try: evaluate,
-    catch: (error) =>
-      error instanceof CliError
-        ? failure(error.code, error.message, error.exitCode)
-        : failure("REMOTE", "Unexpected CLI failure.", REMOTE_EXIT),
-  });
 }
 
 function listingEffect(

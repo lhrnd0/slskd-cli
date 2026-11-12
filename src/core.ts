@@ -63,6 +63,17 @@ export function failure(
   return new CoreFailure({ code, message, exitCode, status });
 }
 
+/** Keep throwing pure validators at the typed operation boundary. */
+export function validateEffect<A>(evaluate: () => A): Effect.Effect<A, CoreFailure> {
+  return Effect.try({
+    try: evaluate,
+    catch: (error) =>
+      error instanceof CliError
+        ? failure(error.code, error.message, error.exitCode)
+        : failure("REMOTE", "Unexpected CLI failure.", EXIT.REMOTE),
+  });
+}
+
 export class ConnectionProfile extends EffectContext.Service<ConnectionProfile, Context>()(
   "slskd-cli/ConnectionProfile",
 ) {}
@@ -184,10 +195,6 @@ export function resolveContextEffect(
         ? error
         : failure("INVALID_CONFIG", "Could not read the connection profile.", EXIT.INVALID_INPUT),
   });
-}
-
-export function connectionProfileLayer(flags: Flags = {}, env: NodeJS.ProcessEnv = process.env) {
-  return Layer.effect(ConnectionProfile, resolveContextEffect(flags, env));
 }
 
 function safeMessage(ctx: Context, message: string): string {
